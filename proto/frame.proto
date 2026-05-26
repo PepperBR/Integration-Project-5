@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package frame.v1;
+
+message Frame {
+    string hex_frame = 1;
+}
+
+message ParsedField {
+    string name = 1;
+    uint32 offset = 2;
+    uint32 length = 3;
+    string value = 4;
+    string description = 5;
+}
+
+message ValidationError {
+    uint32 offset = 1;
+    string message = 2;
+    string found = 4;
+}
+
+message VerifyFrameRequest {
+    Frame frame = 1;
+}
+
+message VerifyFrameResponse {
+    bool valid = 1;
+    repeated ParsedField fields = 2;
+    repeated ValidationError errors = 3;
+}
+
+service FrameService {
+    rpc VerifyFrame(VerifyFrameRequest) returns (VerifyFrameResponse);
+}

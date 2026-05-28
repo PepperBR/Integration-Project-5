@@ -2,10 +2,6 @@ syntax = "proto3";
 
 package frame.v1;
 
-message Frame {
-    string hex_frame = 1;
-}
-
 message ParsedField {
     string name = 1;
     uint32 offset = 2;
@@ -15,13 +11,12 @@ message ParsedField {
 }
 
 message ValidationError {
-    uint32 offset = 1;
+    uint32 code = 1;
     string message = 2;
-    string found = 4;
 }
 
 message VerifyFrameRequest {
-    Frame frame = 1;
+    string raw_frame = 1;
 }
 
 message VerifyFrameResponse {

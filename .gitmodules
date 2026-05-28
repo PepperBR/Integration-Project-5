@@ -1,0 +1,3 @@
+[submodule "gurux/third_party/gurux.dlms.cpp"]
+	path = gurux/third_party/gurux.dlms.cpp
+	url = https://github.com/Gurux/Gurux.DLMS.cpp.git

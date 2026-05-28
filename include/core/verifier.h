@@ -1,8 +1,15 @@
 #pragma once
 
+#include <iomanip>
 #include <list>
 #include <memory>
+#include <sstream>
 #include <string>
+
+#include "GXAPDU.h"
+#include "GXDLMS.h"
+#include "GXDLMSTranslator.h"
+#include "GXReplyData.h"
 
 struct ParsedField
 {
@@ -30,5 +37,5 @@ struct VerifyFrameResponse
 class Verifier
 {
 public:
-    auto validateData(const std::string &data) -> VerifyFrameResponse;
+    auto validateData(std::vector<uint8_t> data) -> VerifyFrameResponse;
 };

@@ -1,11 +1,14 @@
 #pragma once
 
+#include "core/verifier.h"
+#include "frame.pb.h"
 #include "google/protobuf/map.h"
 #include "grpcpp/grpcpp.h"
 #include "grpcpp/server_context.h"
 #include "grpcpp/support/status.h"
-
-#include "frame.pb.h"
+#include <iomanip>
+#include <sstream>
+#include <vector>
 
 namespace os = frame::v1;
 
@@ -17,7 +20,7 @@ class Controler
 public:
     grpc::Status HandleVerifyFrame(grpc::ServerContext *context, const os::VerifyFrameRequest *request, os::VerifyFrameResponse *response);
 
-    void HandleFrameToProto(std::shared_ptr<os::Frame> frame, os::Frame *proto_frame);
+    void HandleFrameToProto(std::shared_ptr<os::VerifyFrameRequest> frame, os::VerifyFrameResponse *proto_frame);
 
 private:
 };

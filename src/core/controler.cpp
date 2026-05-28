@@ -1,11 +1,11 @@
 #include "core/controler.h"
+#include "core/exceptions.hpp"
 
 static std::vector<uint8_t> hexToBytes(const std::string &hex)
 {
     std::vector<uint8_t> bytes;
     std::string clean;
 
-    // Remove espaços e hífens
     for (char c : hex)
     {
         if (c != ' ' && c != '-')
@@ -14,10 +14,9 @@ static std::vector<uint8_t> hexToBytes(const std::string &hex)
         }
     }
 
-    // Quantidade inválida de caracteres
     if (clean.size() % 2 != 0)
     {
-        throw std::runtime_error("Quantidade ímpar de caracteres hexadecimais.");
+        throw pepper::FrameValidationException{};
     }
 
     for (size_t i = 0; i < clean.size(); i += 2)
@@ -44,7 +43,6 @@ grpc::Status Controler::HandleVerifyFrame(grpc::ServerContext *context, const os
 
     try
     {
-        // Converte HEX textual para bytes binários
         std::vector<uint8_t> binary_frame = hexToBytes(request->raw_frame());
 
         if (binary_frame.empty())
@@ -58,14 +56,11 @@ grpc::Status Controler::HandleVerifyFrame(grpc::ServerContext *context, const os
             return grpc::Status::OK;
         }
 
-        // Executa verificação
         Verifier verifier;
         auto internal_result = verifier.validateData(binary_frame);
 
-        // Status geral
         response->set_valid(internal_result.valid);
 
-        // Campos parseados
         for (const auto &internal_field : internal_result.fields)
         {
             auto *proto_field = response->add_fields();
@@ -77,11 +72,9 @@ grpc::Status Controler::HandleVerifyFrame(grpc::ServerContext *context, const os
             proto_field->set_description(internal_field.description);
         }
 
-        // Erros
         for (const auto &internal_err : internal_result.errors)
         {
             auto *proto_error = response->add_errors();
-
             proto_error->set_code(static_cast<uint32_t>(internal_err.offset));
 
             std::string detailed_message = internal_err.message;

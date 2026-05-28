@@ -1,4 +1,13 @@
 #include "core/verifier.h"
+#include "core/DLMSTypes.hpp"
+#include <iomanip>
+#include <sstream>
+
+enum class DLMSTags : uint8_t
+{
+    OCTECT_STRING = 0x09,
+    GET_RESPONSE = 0xC4
+};
 
 static std::string toHexString(const unsigned char *bytes, int length)
 {
@@ -21,6 +30,7 @@ static std::string toHexString(const unsigned char *bytes, int length)
 
 auto Verifier::validateData(std::vector<uint8_t> data) -> VerifyFrameResponse
 {
+    static constexpr uint8_t OCTET_STRING_TAG = 0x09;
     VerifyFrameResponse response;
     response.valid = true;
 
@@ -30,10 +40,7 @@ auto Verifier::validateData(std::vector<uint8_t> data) -> VerifyFrameResponse
         ValidationError err;
 
         err.offset = 0;
-
-        err.message = "Frame muito curto para ser "
-                      "uma APDU DLMS válida.";
-
+        err.message = "Frame muito curto para ser uma APDU DLMS válida.";
         err.found = toHexString((unsigned char *)data.data(), static_cast<int>(data.size()));
         response.errors.push_back(err);
 
@@ -42,33 +49,36 @@ auto Verifier::validateData(std::vector<uint8_t> data) -> VerifyFrameResponse
 
     try
     {
+        // APDU Command Tag
         uint8_t first_byte = data[0];
         ParsedField cmdField;
-
         cmdField.name = "APDU Command Tag";
         cmdField.offset = 0;
         cmdField.length = 1;
+
+        bool isResponse = false;
+        bool isRequest = false;
 
         if (first_byte == 0xC1)
         {
             cmdField.value = "0xC1";
             cmdField.description = "GET-Request";
+            isRequest = true;
         }
         else if (first_byte == 0xC4)
         {
             cmdField.value = "0xC4";
             cmdField.description = "GET-Response";
+            isResponse = true;
         }
         else
         {
             response.valid = false;
             ValidationError err;
             err.offset = 0;
-
             err.message = "Tipo de APDU não suportado.";
 
             std::ostringstream ss;
-
             ss << "0x" << std::hex << std::uppercase << (int)first_byte;
             err.found = ss.str();
             response.errors.push_back(err);
@@ -77,110 +87,161 @@ auto Verifier::validateData(std::vector<uint8_t> data) -> VerifyFrameResponse
         }
         response.fields.push_back(cmdField);
 
-        uint8_t responseType = data[1];
+        // Type Tag
+        uint8_t subType = data[1];
+        ParsedField subTypeField;
+        subTypeField.name = isResponse ? "Response Type" : "Request Type";
+        subTypeField.offset = 1;
+        subTypeField.length = 1;
 
-        ParsedField responseField;
+        std::ostringstream subTypeSs;
+        subTypeSs << "0x" << std::hex << std::uppercase << (int)subType;
+        subTypeField.value = subTypeSs.str();
 
-        responseField.name = "Response Type";
-        responseField.offset = 1;
-        responseField.length = 1;
+        bool validSubType = false;
+        bool isWithList = false;
 
-        std::ostringstream responseSs;
-
-        responseSs << "0x" << std::hex << std::uppercase << (int)responseType;
-
-        responseField.value = responseSs.str();
-
-        switch (responseType)
+        if (isResponse)
         {
-        case 0x01:
-            responseField.description = "GET-Response-Normal";
-            break;
+            switch (subType)
+            {
+            case 0x01:
+                subTypeField.description = "GET-Response-Normal";
+                validSubType = true;
+                break;
+            case 0x02:
+                subTypeField.description = "GET-Response-With-DataBlock";
+                validSubType = true;
+                break;
+            case 0x03:
+            case 0x04:
+                subTypeField.description = "GET-Response-With-List";
+                validSubType = true;
+                isWithList = true;
+                break;
+            }
+        }
+        else if (isRequest)
+        {
+            switch (subType)
+            {
+            case 0x01:
+                subTypeField.description = "GET-Request-Normal";
+                validSubType = true;
+                break;
+            case 0x02:
+                subTypeField.description = "GET-Request-Next";
+                validSubType = true;
+                break;
+            case 0x03:
+                subTypeField.description = "GET-Request-With-List";
+                validSubType = true;
+                isWithList = true;
+                break;
+            }
+        }
 
-        case 0x02:
-            responseField.description = "GET-Response-With-DataBlock";
-            break;
-
-        case 0x03:
-            responseField.description = "GET-Response-With-List";
-            break;
-
-        default: {
+        if (!validSubType)
+        {
             response.valid = false;
             ValidationError err;
             err.offset = 1;
-
-            err.message = "Response Type inválido.";
-
-            err.found = responseField.value;
+            err.message = isResponse ? "Response Type inválido." : "Request Type inválido.";
+            err.found = subTypeField.value;
             response.errors.push_back(err);
 
             return response;
         }
-        }
-        response.fields.push_back(responseField);
+        response.fields.push_back(subTypeField);
+
+        // Invoke ID & Priority
+        uint8_t invokeIdByte = data[2];
         ParsedField invokeField;
         invokeField.name = "Invoke ID & Priority";
-
         invokeField.offset = 2;
         invokeField.length = 1;
 
         std::ostringstream invokeSs;
-
-        invokeSs << "0x" << std::hex << std::uppercase << (int)data[2];
-
+        invokeSs << "0x" << std::hex << std::uppercase << (int)invokeIdByte;
         invokeField.value = invokeSs.str();
-        invokeField.description = "Invoke ID";
+
+        int invokeId = invokeIdByte & 0x0F;
+        std::string priority = (invokeIdByte & 0x80) ? "High" : "Normal";
+        invokeField.description = "Invoke ID: " + std::to_string(invokeId) + " (" + priority + " Priority)";
         response.fields.push_back(invokeField);
-        uint8_t resultCode = data[3];
 
-        ParsedField resultField;
+        size_t payloadOffset = 4;
 
-        resultField.name = "Result Code";
-        resultField.offset = 3;
-        resultField.length = 1;
-
-        std::ostringstream resultSs;
-
-        resultSs << "0x" << std::hex << std::uppercase << (int)resultCode;
-        resultField.value = resultSs.str();
-
-        switch (resultCode)
+        if (isResponse && isWithList)
         {
-        case 0x00:
-            resultField.description = "Success";
-            break;
+            uint8_t listCount = data[3];
+            ParsedField listCountField;
+            listCountField.name = "Result List Count";
+            listCountField.offset = 3;
+            listCountField.length = 1;
 
-        case 0x01:
-            resultField.description = "Hardware Fault";
-            break;
+            std::ostringstream countSs;
+            countSs << "0x" << std::hex << std::uppercase << (int)listCount;
+            listCountField.value = countSs.str();
+            listCountField.description = "Lista contém " + std::to_string((int)listCount) + " item(ns)";
+            response.fields.push_back(listCountField);
 
-        case 0x02:
-            resultField.description = "Temporary Failure";
-            break;
+            if (data.size() > payloadOffset && data[payloadOffset] == 0x00)
+            {
+                ParsedField resultTypeField;
+                resultTypeField.name = "GetDataResult Choice";
+                resultTypeField.offset = static_cast<uint32_t>(payloadOffset);
+                resultTypeField.length = 1;
+                resultTypeField.value = "0x00";
+                resultTypeField.description = "GetDataResult [0] -> Data (Success)";
+                response.fields.push_back(resultTypeField);
 
-        case 0x03:
-            resultField.description = "Read Write Denied";
-            break;
-
-        default: {
-            response.valid = false;
-            ValidationError err;
-            err.offset = 3;
-
-            err.message = "Result Code desconhecido.";
-
-            err.found = resultField.value;
-            response.errors.push_back(err);
-
-            return response;
+                payloadOffset += 1;
+            }
         }
-        }
-
-        response.fields.push_back(resultField);
-        if (data.size() > 4)
+        else
         {
-            size_t payloadOffset = 4;
+            uint8_t resultCode = data[3];
+            ParsedField resultField;
+            resultField.name = "Result Code";
+            resultField.offset = 3;
+            resultField.length = 1;
+
+            std::ostringstream resultSs;
+            resultSs << "0x" << std::hex << std::uppercase << (int)resultCode;
+            resultField.value = resultSs.str();
+
+            switch (resultCode)
+            {
+            case 0x00:
+                resultField.description = "Success";
+                break;
+            case 0x01:
+                resultField.description = "Hardware Fault";
+                break;
+            case 0x02:
+                resultField.description = "Temporary Failure";
+                break;
+            case 0x03:
+                resultField.description = "Read Write Denied";
+                break;
+            default: {
+                response.valid = false;
+                ValidationError err;
+                err.offset = 3;
+                err.message = "Result Code desconhecido.";
+                err.found = resultField.value;
+                response.errors.push_back(err);
+
+                return response;
+            }
+            }
+            response.fields.push_back(resultField);
+        }
+
+        // Decodificação do COSEM Data Payload
+        if (data.size() > payloadOffset)
+        {
             uint8_t dataTag = data[payloadOffset];
             ParsedField payloadField;
 
@@ -192,129 +253,81 @@ auto Verifier::validateData(std::vector<uint8_t> data) -> VerifyFrameResponse
 
             switch (dataTag)
             {
-            case 0x09: {
-                if (data.size() < payloadOffset + 2)
-                {
-                    payloadValid = false;
-                    ValidationError err;
-                    err.offset = payloadOffset;
-
-                    err.message = "Octet String incompleta.";
-
-                    response.errors.push_back(err);
-
-                    break;
-                }
-                uint8_t declaredSize = data[payloadOffset + 1];
-
-                size_t realSize = data.size() - (payloadOffset + 2);
-
-                if (realSize < declaredSize)
-                {
-                    payloadValid = false;
-                    ValidationError err;
-
-                    err.offset = payloadOffset + 1;
-                    std::ostringstream ss;
-
-                    ss << "Octet String inválida. "
-                       << "Tamanho declarado = " << (int)declaredSize << ", tamanho recebido = " << realSize;
-
-                    err.message = ss.str();
-                    response.errors.push_back(err);
-                }
-                payloadField.description = "Octet String";
-
+            case (uint8_t)(DLMSTags::OCTECT_STRING): { // AQUI RAUL
+                pepper::DLMSTypes::parserOctetString(1);
                 break;
             }
-            case 0x11: {
+            case 0x11: { // UInt8
                 if (data.size() < payloadOffset + 2)
                 {
                     payloadValid = false;
                     ValidationError err;
-
                     err.offset = payloadOffset;
-
                     err.message = "UInt8 incompleto.";
                     response.errors.push_back(err);
                 }
                 payloadField.description = "UInt8";
-
                 break;
             }
-            case 0x01: {
+            case 0x01: { // Array DLMS
                 if (data.size() < payloadOffset + 2)
                 {
                     payloadValid = false;
                     ValidationError err;
-
                     err.offset = payloadOffset;
-
                     err.message = "Array DLMS incompleto.";
                     response.errors.push_back(err);
-
                     break;
                 }
                 uint8_t count = data[payloadOffset + 1];
-                size_t expectedMinimum = payloadOffset + 2 + (count * 2);
+                size_t bytesRestantes = data.size() - (payloadOffset + 2);
+                size_t minimoRequerido = static_cast<size_t>(count) * 2;
 
-                if (data.size() < expectedMinimum)
+                if (bytesRestantes < minimoRequerido)
                 {
                     payloadValid = false;
                     ValidationError err;
-
-                    err.offset = payloadOffset;
-
+                    err.offset = payloadOffset + 1;
                     err.message = "Array com elementos faltando.";
                     response.errors.push_back(err);
                 }
                 payloadField.description = "Array DLMS";
-
                 break;
             }
-            case 0x02: {
+            case 0x02: { // Structure DLMS
                 if (data.size() < payloadOffset + 2)
                 {
                     payloadValid = false;
                     ValidationError err;
-
                     err.offset = payloadOffset;
-
                     err.message = "Structure DLMS incompleta.";
                     response.errors.push_back(err);
-
                     break;
                 }
                 uint8_t count = data[payloadOffset + 1];
-                size_t expectedMinimum = payloadOffset + 2 + (count * 2);
+                size_t bytesRestantes = data.size() - (payloadOffset + 2);
+                size_t minimoRequerido = static_cast<size_t>(count) * 2;
 
-                if (data.size() < expectedMinimum)
+                if (bytesRestantes < minimoRequerido)
                 {
                     payloadValid = false;
                     ValidationError err;
-
-                    err.offset = payloadOffset;
-
+                    err.offset = payloadOffset + 1;
                     err.message = "Structure com elementos faltando.";
                     response.errors.push_back(err);
                 }
                 payloadField.description = "Structure DLMS";
-
                 break;
             }
             default: {
                 payloadValid = false;
                 ValidationError err;
-
                 err.offset = payloadOffset;
                 std::ostringstream ss;
-
                 ss << "Tag DLMS desconhecida: 0x" << std::hex << std::uppercase << (int)dataTag;
-
                 err.message = ss.str();
                 response.errors.push_back(err);
                 payloadField.description = "Payload inválido";
-
                 break;
             }
             }
@@ -330,7 +343,6 @@ auto Verifier::validateData(std::vector<uint8_t> data) -> VerifyFrameResponse
     {
         response.valid = false;
         ValidationError err;
-
         err.offset = 0;
         err.message = std::string("Exceção inesperada no validador: ") + e.what();
         response.errors.push_back(err);

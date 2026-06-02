@@ -15,7 +15,7 @@ auto GET_REQUEST_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFra
     }
     response.valid = true;
 
-    const auto subType = static_cast<GetServiceType>(data[1]);
+    const auto subType = static_cast<ServiceType>(data[1]);
     uint8_t invokeId = data[2];
 
     constexpr size_t expectedMinimumSize = 12;
@@ -41,7 +41,7 @@ auto GET_REQUEST_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFra
 
     switch (subType)
     {
-    case GetServiceType::NORMAL:
+    case ServiceType::NORMAL:
 
         if (data.size() < expectedMinimumSize)
         {
@@ -70,7 +70,7 @@ auto GET_REQUEST_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFra
         }
         break;
 
-    case GetServiceType::WITH_DATABLOCK:
+    case ServiceType::WITH_DATABLOCK:
 
         if (data.size() != expectedSize)
         {
@@ -92,7 +92,7 @@ auto GET_REQUEST_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFra
         response.fields.push_back(blockField);
         break;
 
-    case GetServiceType::WITH_LIST:
+    case ServiceType::WITH_LIST: {
         if (data.size() < 4)
         {
             response.valid = false;
@@ -105,32 +105,93 @@ auto GET_REQUEST_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFra
 
         listCount = data[3];
 
-        countField.name = "Result List Count";
+        countField.name = "Attribute Descriptor Count";
         countField.offset = 3;
         countField.length = 1;
         countField.value = std::to_string((int)listCount);
-        countField.description = "Quantidade de atributos solicitados na mesma lista";
+        countField.description = "Quantidade de atributos solicitados";
         response.fields.push_back(countField);
 
-        expectedListSize = 4 + (listCount * 9);
+        size_t currentOffset = 4;
 
-        if (data.size() < expectedListSize)
+        for (uint8_t i = 0; i < listCount; ++i)
         {
-            response.valid = false;
-            ValidationError err;
-            err.offset = 4;
-            err.message = "GET-Request-with-List incompleto. O número de bytes não atende a quantidade de objetos declarada na lista.";
-            response.errors.push_back(err);
+            // 9 bytes do COSEM Attribute Descriptor
+            if (currentOffset + 9 > data.size())
+            {
+                response.valid = false;
+
+                ValidationError err;
+                err.offset = currentOffset;
+                err.message = "GET-Request-with-List incompleto. "
+                              "COSEM Attribute Descriptor ausente ou truncado.";
+                response.errors.push_back(err);
+
+                break;
+            }
+
+            ParsedField descriptor;
+            descriptor.name = "COSEM Attribute Descriptor #" + std::to_string(i + 1);
+            descriptor.offset = currentOffset;
+            descriptor.length = 9;
+            descriptor.description = "Identificador do Objeto e Atributo solicitado";
+
+            response.fields.push_back(descriptor);
+
+            currentOffset += 9;
+
+            // Access Selection (obrigatório)
+            if (currentOffset >= data.size())
+            {
+                response.valid = false;
+
+                ValidationError err;
+                err.offset = currentOffset;
+                err.message = "GET-Request-with-List incompleto. "
+                              "Byte Access Selection ausente.";
+                response.errors.push_back(err);
+
+                break;
+            }
+
+            uint8_t accessSelection = data[currentOffset];
+
+            ParsedField accessField;
+            accessField.name = "Access Selection #" + std::to_string(i + 1);
+            accessField.offset = currentOffset;
+            accessField.length = 1;
+            accessField.value = std::to_string(accessSelection);
+            accessField.description = accessSelection == 0 ? "Sem acesso seletivo" : "Com acesso seletivo";
+
+            response.fields.push_back(accessField);
+
+            currentOffset += 1;
+
+            if (accessSelection != 0)
+            {
+                response.valid = false;
+
+                ValidationError err;
+                err.offset = currentOffset - 1;
+                err.message = "Access Selection diferente de zero ainda não é suportado pelo verificador.";
+                response.errors.push_back(err);
+
+                break;
+            }
         }
-        else if (data.size() > expectedListSize)
+
+        if (response.valid && currentOffset < data.size())
         {
             response.valid = false;
+
             ValidationError err;
-            err.offset = expectedListSize;
+            err.offset = currentOffset;
             err.message = "Bytes adicionais/sobressalentes detectados no fim da estrutura da lista.";
             response.errors.push_back(err);
         }
+
         break;
+    }
 
     default:
         response.valid = false;

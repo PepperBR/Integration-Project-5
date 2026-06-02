@@ -10,8 +10,8 @@
 #include "GXDLMS.h"
 #include "GXDLMSTranslator.h"
 #include "GXReplyData.h"
-#include "core/COSEMCommandType.h"
-#include "core/CommandTypes/GET/GET_enums.h"
+#include "core/Enums.h"
+
 #include "core/CommonVerifierTypes.h"
 
 class GET_REQUEST_VERIFIER

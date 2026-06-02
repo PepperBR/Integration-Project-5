@@ -1,6 +1,6 @@
-#include "core/CommandTypes/GET/GET_Verifier.h"
+#include "core/CommandTypes/SET/SET_Verifier.h"
 
-auto Get_Verifier::typeVerifier(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto Set_Verifier::typeVerifier(const std::vector<uint8_t> &data) -> VerifyFrameResponse
 {
     VerifyFrameResponse response;
 
@@ -10,21 +10,21 @@ auto Get_Verifier::typeVerifier(const std::vector<uint8_t> &data) -> VerifyFrame
     subTypeField.offset = 1;
     subTypeField.length = 1;
 
-    if (serviceTag == 0xC0)
+    if (serviceTag == 0xC1)
     {
-        GET_REQUEST_VERIFIER request_verifier;
+        SET_REQUEST_VERIFIER request_verifier;
         return request_verifier.verify(data);
     }
-    else if (serviceTag == 0xC4)
+    else if (serviceTag == 0xC5)
     {
-        GET_RESPONSE_VERIFIER response_verifier;
+        SET_RESPONSE_VERIFIER response_verifier;
         return response_verifier.verify(data);
     }
 
     response.valid = false;
     ValidationError err;
     err.offset = 0;
-    err.message = "Tag de comando principal inválida para o contexto de GET.";
+    err.message = "Tag de comando principal inválida para o contexto de SET (Esperado 0xC1 ou 0xC5).";
     response.errors.push_back(err);
     return response;
 }

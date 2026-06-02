@@ -1,10 +1,4 @@
 #include "core/VerifierCOSEM.h"
-#include "core/CommandTypes/GET/GET_Verifier.h" // Assuming this is where GET_Verifier lives
-// #include "core/CommandTypes/SET/SET_Verifier.h"      // Ready for later
-// #include "core/CommandTypes/ACTIONS/ACTION_Verifier.h" // Ready for later
-
-#include <iomanip>
-#include <sstream>
 
 static std::string toHexString(const unsigned char *bytes, int length)
 {
@@ -40,7 +34,7 @@ auto VerifierCOSEM::verifyCOSEM(std::vector<uint8_t> data) -> VerifyFrameRespons
     // Detect the core service group (GET, SET, or ACTION)
     auto commandType = selectTypeCommand(data[0]);
 
-    if (commandType == COSEMCommandType::UNKNOWN)
+    if (commandType == Enums::UNKNOWN)
     {
         VerifyFrameResponse response;
         response.valid = false;
@@ -55,44 +49,39 @@ auto VerifierCOSEM::verifyCOSEM(std::vector<uint8_t> data) -> VerifyFrameRespons
     return selectTypeVerifier(commandType, data);
 }
 
-auto VerifierCOSEM::selectTypeCommand(uint8_t type_command) -> COSEMCommandType
+auto VerifierCOSEM::selectTypeCommand(uint8_t type_command) -> Enums
 {
     switch (type_command)
     {
     case 0xC0:
     case 0xC4:
-        return COSEMCommandType::GET;
+        return Enums::GET;
     case 0xC1:
     case 0xC5:
-        return COSEMCommandType::SET;
-    case 0xC3:
+        return Enums::SET;
+    case 0xC6:
     case 0xC7:
-        return COSEMCommandType::ACTION;
+        return Enums::ACTION;
     default:
-        return COSEMCommandType::UNKNOWN;
+        return Enums::UNKNOWN;
     }
 }
 
-auto VerifierCOSEM::selectTypeVerifier(COSEMCommandType type_command, const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto VerifierCOSEM::selectTypeVerifier(Enums type_command, const std::vector<uint8_t> &data) -> VerifyFrameResponse
 {
     switch (type_command)
     {
-    case COSEMCommandType::GET: {
-        // Tier 2: Hands off the vector to the GET director
+    case Enums::GET: {
         Get_Verifier get_verifier;
         return get_verifier.typeVerifier(data);
     }
-    case COSEMCommandType::SET: {
-        // TODO: Return set_verifier.verify(data); when ready
-        VerifyFrameResponse response;
-        response.valid = false;
-        return response;
+    case Enums::SET: {
+        Set_Verifier set_verifier;
+        return set_verifier.typeVerifier(data);
     }
-    case COSEMCommandType::ACTION: {
-        // TODO: Return action_verifier.verify(data); when ready
-        VerifyFrameResponse response;
-        response.valid = false;
-        return response;
+    case Enums::ACTION: {
+        Actions_Verifier actions_verifier;
+        return actions_verifier.typeVerifier(data);
     }
     default:
         VerifyFrameResponse response;

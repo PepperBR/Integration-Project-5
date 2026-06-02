@@ -17,7 +17,7 @@ auto GET_RESPONSE_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFr
     }
     response.valid = true;
 
-    const auto subType = static_cast<GetServiceType>(data[1]);
+    const auto subType = static_cast<ServiceType>(data[1]);
     uint8_t invokeId = data[2];
 
     constexpr size_t expectedHeaderSize = 11;
@@ -46,7 +46,7 @@ auto GET_RESPONSE_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFr
 
     switch (subType)
     {
-    case GetServiceType::NORMAL:
+    case ServiceType::NORMAL:
         if (data.size() < 4)
         {
             response.valid = false;
@@ -103,7 +103,7 @@ auto GET_RESPONSE_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFr
         }
         break;
 
-    case GetServiceType::WITH_DATABLOCK:
+    case ServiceType::WITH_DATABLOCK:
         if (data.size() < expectedHeaderSize)
         {
             response.valid = false;
@@ -167,7 +167,7 @@ auto GET_RESPONSE_VERIFIER::verify(const std::vector<uint8_t> &data) -> VerifyFr
         }
         break;
 
-    case GetServiceType::WITH_LIST:
+    case ServiceType::WITH_LIST:
         if (data.size() < 4)
         {
             response.valid = false;

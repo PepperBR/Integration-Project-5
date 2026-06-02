@@ -10,13 +10,11 @@
 #include "GXDLMS.h"
 #include "GXDLMSTranslator.h"
 #include "GXReplyData.h"
-#include "core/CommandTypes/GET/GET_REQUEST_VERIFIER.h"
-#include "core/CommandTypes/GET/GET_RESPONSE_VERIFIER.h"
 #include "core/CommonVerifierTypes.h"
 #include "core/Enums.h"
 
-class Get_Verifier
+class ACTIONS_RESPONSE_VERIFIER
 {
 public:
-    auto typeVerifier(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
+    auto verify(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
 };

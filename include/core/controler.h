@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core/VerifierCOSEM.h"
-#include "core/verifier.h"
 #include "frame.pb.h"
 #include "google/protobuf/map.h"
 #include "grpcpp/grpcpp.h"

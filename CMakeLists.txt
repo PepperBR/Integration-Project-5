@@ -26,11 +26,13 @@ target_include_directories(${PROJECT_NAME}_lib
 
 target_sources(${PROJECT_NAME}_lib 
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/verifier.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/VerifierCOSEM.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/controler.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/service/frame_service.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/server/server.cpp
-
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_Verifier.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_REQUEST_VERIFIER.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_RESPONSE_VERIFIER.cpp
         ${GURUX_SOURCES}
 )
 

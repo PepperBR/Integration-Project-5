@@ -1,5 +1,4 @@
 #include "core/controler.h"
-#include "core/exceptions.hpp"
 
 static std::vector<uint8_t> hexToBytes(const std::string &hex)
 {
@@ -16,7 +15,7 @@ static std::vector<uint8_t> hexToBytes(const std::string &hex)
 
     if (clean.size() % 2 != 0)
     {
-        throw pepper::FrameValidationException{};
+        throw std::runtime_error("O número de caracteres hexadecimais deve ser par.");
     }
 
     for (size_t i = 0; i < clean.size(); i += 2)
@@ -56,8 +55,8 @@ grpc::Status Controler::HandleVerifyFrame(grpc::ServerContext *context, const os
             return grpc::Status::OK;
         }
 
-        Verifier verifier;
-        auto internal_result = verifier.validateData(binary_frame);
+        VerifierCOSEM verifier;
+        auto internal_result = verifier.verifyCOSEM(binary_frame);
 
         response->set_valid(internal_result.valid);
 

@@ -14,7 +14,9 @@ target_link_libraries(${PROJECT_NAME}
 
 target_sources(${PROJECT_NAME} 
     PUBLIC 
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_verifier.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_VerifierCOSEM.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_GetRequestVerifier.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_GetResponseVerifier.cpp
 
 )
 
@@ -27,4 +29,5 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE 
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/generated
+        ${CMAKE_SOURCE_DIR}/test/include
 )

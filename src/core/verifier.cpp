@@ -254,7 +254,7 @@ auto Verifier::validateData(std::vector<uint8_t> data) -> VerifyFrameResponse
             switch (dataTag)
             {
             case (uint8_t)(DLMSTags::OCTECT_STRING): { // AQUI RAUL
-                pepper::DLMSTypes::parserOctetString(1);
+                // pepper::DLMSTypes::parserOctetString(1);
                 break;
             }
             case 0x11: { // UInt8

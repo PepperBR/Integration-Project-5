@@ -26,22 +26,24 @@ target_include_directories(${PROJECT_NAME}_lib
 
 target_sources(${PROJECT_NAME}_lib 
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/VerifierCOSEM.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/controler.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/XDlms.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/Controller.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/service/frame_service.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/server/server.cpp
         
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_Verifier.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_REQUEST_VERIFIER.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_RESPONSE_VERIFIER.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ParseHeader.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/REQUEST/GetRequestParser.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_Verifier.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_REQUEST_VERIFIER.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_RESPONSE_VERIFIER.cpp
         
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_Verifier.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_REQUEST_VERIFIER.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_RESPONSE_VERIFIER.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_Verifier.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_REQUEST_VERIFIER.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_RESPONSE_VERIFIER.cpp
         
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_Verifier.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_REQUEST_VERIFIER.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_RESPONSE_VERIFIER.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_Verifier.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_REQUEST_VERIFIER.cpp
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_RESPONSE_VERIFIER.cpp
 
         ${GURUX_SOURCES}
 )
@@ -73,4 +75,4 @@ if(MSVC)
     )
 endif()
 
-add_subdirectory(test)
+# add_subdirectory(test)

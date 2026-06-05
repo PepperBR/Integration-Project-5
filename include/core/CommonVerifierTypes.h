@@ -1,5 +1,8 @@
 #pragma once
 
+#include <list>
+#include <string>
+
 struct ParsedField
 {
     std::string name;

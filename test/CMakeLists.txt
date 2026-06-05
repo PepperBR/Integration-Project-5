@@ -14,16 +14,9 @@ target_link_libraries(${PROJECT_NAME}
 
 target_sources(${PROJECT_NAME} 
     PUBLIC 
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_VerifierCOSEM.cpp
-
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_GetRequestVerifier.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_GetResponseVerifier.cpp
-
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_SetRequestVerifier.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_SetResponseVerifier.cpp
-
         ${CMAKE_CURRENT_SOURCE_DIR}/src/test_ActionsRequestVerifier.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/test_ActionsResponseVerifier.cpp
+
 )
 
 target_link_libraries(${PROJECT_NAME} 

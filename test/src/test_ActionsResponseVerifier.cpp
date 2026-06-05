@@ -1,114 +1,181 @@
-#include "core/CommandTypes/ACTIONS/ACTIONS_RESPONSE_VERIFIER.h"
-#include "hexToBytes.h"
-
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <string>
 #include <vector>
 
-TEST_CASE("ACTIONS_RESPONSE_VERIFIER Validation Tests")
+#include "core/CommandTypes/ACTIONS/RESPONSE/ActionResponseParser.h"
+#include "hexToBytes.h"
+
+TEST_CASE("ActionResponseParser - Validações Gerais e Erros de Inicialização", "[ActionResponse][General]")
 {
-    ACTIONS_RESPONSE_VERIFIER verifier;
+    ActionResponseParser parser;
 
-    SECTION("Global Edge Cases")
+    SECTION("Frame excessivamente curto (< 3 bytes)")
     {
-        std::string frame_too_short = "C7 01";
-        auto result = verifier.verify(hexToBytes(frame_too_short));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+        std::vector<uint8_t> data = {0xC7, 0x01};
+        auto response = parser.verify(data);
 
-        std::string unknown_subtype = "C7 99 81";
-        result = verifier.verify(hexToBytes(unknown_subtype));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+        REQUIRE_FALSE(response.valid);
+        REQUIRE_FALSE(response.errors.empty());
     }
 
-    SECTION("ACTION-Response-Normal (0x01)")
+    SECTION("Subtipo de ACTION-RESPONSE desconhecido")
     {
-        // Missing ActionResult byte
-        std::string result_missing = "C7 01 81";
-        auto result = verifier.verify(hexToBytes(result_missing));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+        auto data = hexToBytes("C7 09 41");
+        auto response = parser.verify(data);
 
-        std::string valid_success_empty = "C7 01 81 00";
-        result = verifier.verify(hexToBytes(valid_success_empty));
-        REQUIRE(result.valid);
-        REQUIRE(result.errors.empty());
+        REQUIRE_FALSE(response.valid);
+        REQUIRE_FALSE(response.errors.empty());
+    }
+}
 
-        std::string valid_success_with_params = "C7 01 81 00 01 02 03";
-        result = verifier.verify(hexToBytes(valid_success_with_params));
-        REQUIRE(result.valid);
-        REQUIRE(result.errors.empty());
+TEST_CASE("ActionResponseParser - ACTION-RESPONSE-NORMAL (Subtipo 0x01)", "[ActionResponse][Normal]")
+{
+    ActionResponseParser parser;
 
-        std::string valid_error_state = "C7 01 81 03";
-        result = verifier.verify(hexToBytes(valid_error_state));
-        REQUIRE(result.valid);
-        REQUIRE(result.errors.empty());
+    SECTION("Caminho Feliz: Sucesso e sem parâmetros de retorno")
+    {
+        auto data = hexToBytes("C7 01 41 00 00");
+        auto response = parser.verify(data);
 
-        // Indicates failure but has redundant trailing data
-        std::string error_with_trailing_garbage = "C7 01 81 03 AA BB";
-        result = verifier.verify(hexToBytes(error_with_trailing_garbage));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+        REQUIRE(response.valid);
+        REQUIRE(response.errors.empty());
+        REQUIRE(response.fields.size() >= 3);
     }
 
-    SECTION("ACTION-Response-with-DataBlock (0x02)")
+    SECTION("Caminho Feliz: Com parâmetros de retorno (Get-Data-Result tipo Data)")
     {
-        // Truncated structure
-        std::string truncated_datablock = "C7 02 81 01 00 00 00 05 00";
-        auto result = verifier.verify(hexToBytes(truncated_datablock));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+        auto data = hexToBytes("C7 01 41 00 01 00 AA BB CC");
+        auto response = parser.verify(data);
 
-        std::string valid_datablock = "C7 02 81 01 00 00 00 01 00 02 AA BB";
-        result = verifier.verify(hexToBytes(valid_datablock));
-        REQUIRE(result.valid);
-        REQUIRE(result.errors.empty());
-
-        // Data block payload length mismatch
-        std::string datablock_length_short = "C7 02 81 01 00 00 00 01 00 02 AA";
-        result = verifier.verify(hexToBytes(datablock_length_short));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
-
-        // Data block payload length mismatch
-        std::string datablock_length_oversized = "C7 02 81 01 00 00 00 01 00 02 AA BB CC DD";
-        result = verifier.verify(hexToBytes(datablock_length_oversized));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+        REQUIRE(response.valid);
+        REQUIRE(response.fields.size() >= 4);
     }
 
-    SECTION("ACTION-Response-with-List (0x03)")
+    SECTION("Caminho Feliz: Com parâmetros de retorno (Get-Data-Result tipo Data-Access-Result)")
     {
-        // Count parameter missing
-        std::string count_missing = "C7 03 81";
-        auto result = verifier.verify(hexToBytes(count_missing));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+        auto data = hexToBytes("C7 01 41 00 01 01 03");
+        auto response = parser.verify(data);
 
-        std::string valid_list = "C7 03 81 02 "
-                                 "00 06 "
-                                 "01 03";
-        result = verifier.verify(hexToBytes(valid_list));
-        REQUIRE(result.valid);
-        REQUIRE(result.errors.empty());
+        REQUIRE(response.valid);
+        REQUIRE(response.fields.size() >= 4);
+    }
 
-        // Structural truncation
-        std::string truncated_list = "C7 03 81 02 00 06";
-        result = verifier.verify(hexToBytes(truncated_list));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+    SECTION("Erro: Frame incompleto / truncado no Action-Result")
+    {
+        auto data = hexToBytes("C7 01 41");
+        auto response = parser.verify(data);
 
-        // Mandatory error code byte is missing
-        std::string error_item_missing_code = "C7 03 81 01 01";
-        result = verifier.verify(hexToBytes(error_item_missing_code));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+        REQUIRE_FALSE(response.valid);
+    }
 
-        // Redundant trailing payload
-        std::string trailing_garbage_list = "C7 03 81 01 00 06 FF EE";
-        result = verifier.verify(hexToBytes(trailing_garbage_list));
-        REQUIRE_FALSE(result.valid);
-        REQUIRE_FALSE(result.errors.empty());
+    SECTION("Erro: Action-Result com código inválido/desconhecido")
+    {
+        auto data = hexToBytes("C7 01 41 55");
+        auto response = parser.verify(data);
+
+        REQUIRE_FALSE(response.valid);
+    }
+
+    SECTION("Erro: Indicador de Return-Parameters inválido")
+    {
+        auto data = hexToBytes("C7 01 41 00 05");
+        auto response = parser.verify(data);
+
+        REQUIRE_FALSE(response.valid);
+    }
+}
+
+TEST_CASE("ActionResponseParser - ACTION-RESPONSE-WITH-PBLOCK (Subtipo 0x02)", "[ActionResponse][WithPblock]")
+{
+    ActionResponseParser parser;
+
+    SECTION("Caminho Feliz: Bloco de dados válido")
+    {
+        auto data = hexToBytes("C7 02 41 01 00 00 00 02 11 22");
+        auto response = parser.verify(data);
+
+        REQUIRE(response.valid);
+        REQUIRE(response.fields.size() >= 2);
+    }
+
+    SECTION("Erro: Frame muito curto para conter a estrutura mínima de um pblock")
+    {
+        auto data = hexToBytes("C7 02 41 01 00");
+        auto response = parser.verify(data);
+
+        REQUIRE_FALSE(response.valid);
+    }
+
+    SECTION("Erro: DataBlock-SA incompleto no offset interno")
+    {
+        auto data = hexToBytes("C7 02 41 01 00 00 00");
+        auto response = parser.verify(data);
+
+        REQUIRE_FALSE(response.valid);
+    }
+}
+
+TEST_CASE("ActionResponseParser - ACTION-RESPONSE-WITH-LIST (Subtipo 0x03)", "[ActionResponse][WithList]")
+{
+    ActionResponseParser parser;
+
+    SECTION("Caminho Feliz: Lista com múltiplos resultados")
+    {
+        auto data = hexToBytes("C7 03 41 02 00 00 02 01");
+        auto response = parser.verify(data);
+
+        REQUIRE(response.valid);
+        REQUIRE(response.fields.size() >= 6);
+    }
+
+    SECTION("Erro: Frame menor que o tamanho mínimo de lista")
+    {
+        auto data = hexToBytes("C7 03 41");
+        auto response = parser.verify(data);
+
+        REQUIRE_FALSE(response.valid);
+    }
+
+    SECTION("Erro: Lista truncada prematuramente")
+    {
+        auto data = hexToBytes("C7 03 41 02 00 00");
+        auto response = parser.verify(data);
+
+        REQUIRE_FALSE(response.valid);
+    }
+
+    SECTION("Erro: Action-Result inválido dentro de um elemento da lista")
+    {
+        auto data = hexToBytes("C7 03 41 01 FF");
+        auto response = parser.verify(data);
+
+        REQUIRE_FALSE(response.valid);
+    }
+}
+
+TEST_CASE("ActionResponseParser - ACTION-RESPONSE-NEXT-PBLOCK (Subtipo 0x04)", "[ActionResponse][NextPblock]")
+{
+    ActionResponseParser parser;
+
+    SECTION("Caminho Feliz: Número de bloco decodificado com sucesso")
+    {
+        auto data = hexToBytes("C7 04 41 00 00 00 FF");
+        auto response = parser.verify(data);
+
+        REQUIRE(response.valid);
+        REQUIRE_FALSE(response.fields.empty());
+
+        auto lastField = response.fields.back();
+        CHECK(lastField.name == "Block-Number");
+        CHECK(lastField.value == "255");
+    }
+
+    SECTION("Erro: Falta de bytes para compor o Unsigned32 do Block-Number")
+    {
+        auto data = hexToBytes("C7 04 41 00 00");
+        auto response = parser.verify(data);
+
+        REQUIRE_FALSE(response.valid);
     }
 }

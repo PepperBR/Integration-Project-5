@@ -33,17 +33,9 @@ target_sources(${PROJECT_NAME}_lib
         
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ParseHeader.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/REQUEST/GetRequestParser.cpp
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_Verifier.cpp
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_REQUEST_VERIFIER.cpp
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/GET_RESPONSE_VERIFIER.cpp
-        
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_Verifier.cpp
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_REQUEST_VERIFIER.cpp
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/SET_RESPONSE_VERIFIER.cpp
-        
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_Verifier.cpp
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_REQUEST_VERIFIER.cpp
-        # ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/ACTIONS_RESPONSE_VERIFIER.cpp
+
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/REQUEST/ActionRequestParser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/RESPONSE/ActionResponseParser.cpp
 
         ${GURUX_SOURCES}
 )
@@ -75,4 +67,4 @@ if(MSVC)
     )
 endif()
 
-# add_subdirectory(test)
+add_subdirectory(test)

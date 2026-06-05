@@ -2,12 +2,8 @@
 
 #include <cstdint>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Top-level APDU discriminators (byte[0] of an xDLMS frame)
-// ─────────────────────────────────────────────────────────────────────────────
 enum class XDlmsApduTag : uint8_t
 {
-    // ── No ciphering (SN referencing) ────────────────────────────────────────
     INITIATE_REQUEST = 0x01,
     READ_REQUEST = 0x05,
     WRITE_REQUEST = 0x06,
@@ -19,16 +15,14 @@ enum class XDlmsApduTag : uint8_t
     UNCONFIRMED_WRITE_REQUEST = 0x16,
     INFORMATION_REPORT_REQUEST = 0x18,
 
-    // ── No ciphering (LN referencing) ────────────────────────────────────────
-    GET_REQUEST = 0xC0,                // 192
-    SET_REQUEST = 0xC1,                // 193
-    EVENT_NOTIFICATION_REQUEST = 0xC2, // 194
-    ACTION_REQUEST = 0xC3,             // 195
-    GET_RESPONSE = 0xC4,               // 196
-    SET_RESPONSE = 0xC5,               // 197
-    ACTION_RESPONSE = 0xC7,            // 199
+    GET_REQUEST = 0xC0,
+    SET_REQUEST = 0xC1,
+    EVENT_NOTIFICATION_REQUEST = 0xC2,
+    ACTION_REQUEST = 0xC3,
+    GET_RESPONSE = 0xC4,
+    SET_RESPONSE = 0xC5,
+    ACTION_RESPONSE = 0xC7,
 
-    // ── Global ciphering (LN) ─────────────────────────────────────────────────
     GLO_GET_REQUEST = 0xC8,
     GLO_SET_REQUEST = 0xC9,
     GLO_EVENT_NOTIFICATION = 0xCA,
@@ -37,7 +31,6 @@ enum class XDlmsApduTag : uint8_t
     GLO_SET_RESPONSE = 0xCD,
     GLO_ACTION_RESPONSE = 0xCF,
 
-    // ── Dedicated ciphering (LN) ──────────────────────────────────────────────
     DED_GET_REQUEST = 0xD0,
     DED_SET_REQUEST = 0xD1,
     DED_EVENT_NOTIFICATION = 0xD2,
@@ -46,43 +39,35 @@ enum class XDlmsApduTag : uint8_t
     DED_SET_RESPONSE = 0xD5,
     DED_ACTION_RESPONSE = 0xD7,
 
-    // ── General APDUs ─────────────────────────────────────────────────────────
-    EXCEPTION_RESPONSE = 0xD8,     // 216
-    ACCESS_REQUEST = 0xD9,         // 217
-    ACCESS_RESPONSE = 0xDA,        // 218
-    GENERAL_GLO_CIPHERING = 0xDB,  // 219
-    GENERAL_DED_CIPHERING = 0xDC,  // 220
-    GENERAL_CIPHERING = 0xDD,      // 221
-    GENERAL_SIGNING = 0xDF,        // 223
-    GENERAL_BLOCK_TRANSFER = 0xE0, // 224
+    EXCEPTION_RESPONSE = 0xD8,
+    ACCESS_REQUEST = 0xD9,
+    ACCESS_RESPONSE = 0xDA,
+    GENERAL_GLO_CIPHERING = 0xDB,
+    GENERAL_DED_CIPHERING = 0xDC,
+    GENERAL_CIPHERING = 0xDD,
+    GENERAL_SIGNING = 0xDF,
+    GENERAL_BLOCK_TRANSFER = 0xE0,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Service sub-type (byte[1] — choice tag inside each command family)
-// ─────────────────────────────────────────────────────────────────────────────
 enum class ServiceType : uint8_t
 {
     NORMAL = 0x01,
     WITH_DATABLOCK = 0x02,
     WITH_LIST = 0x03,
-    WITH_FIRST_DATABLOCK = 0x02, // alias for SET-request
+    WITH_FIRST_DATABLOCK = 0x02,
     WITH_LIST_AND_FIRST_DATABLOCK = 0x05,
     LAST_DATABLOCK = 0x03,
     LAST_DATABLOCK_WITH_LIST = 0x04,
-    // Action sub-types
     NEXT_PBLOCK = 0x02,
     WITH_FIRST_PBLOCK = 0x04,
     WITH_LIST_AND_FIRST_PBLOCK = 0x05,
     WITH_PBLOCK = 0x06,
-    WITH_OPTIONAL_DATA = 0x01, // action-response-normal
+    WITH_OPTIONAL_DATA = 0x01,
     WITH_PBLOCK_RESPONSE = 0x02,
     WITH_LIST_RESPONSE = 0x03,
     NEXT_PBLOCK_RESPONSE = 0x04,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Invoke-Id-And-Priority bit-field sub-values
-// ─────────────────────────────────────────────────────────────────────────────
 enum class Priority : uint8_t
 {
     NORMAL = 0,
@@ -95,9 +80,6 @@ enum class ServiceClass : uint8_t
     CONFIRMED = 1
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Data-Access-Result (used by GET response and SET response)
-// ─────────────────────────────────────────────────────────────────────────────
 enum class DataAccessResult : uint8_t
 {
     SUCCESS = 0,
@@ -118,9 +100,6 @@ enum class DataAccessResult : uint8_t
     OTHER_REASON = 250
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Action-Result
-// ─────────────────────────────────────────────────────────────────────────────
 enum class ActionResult : uint8_t
 {
     SUCCESS = 0,
@@ -138,18 +117,12 @@ enum class ActionResult : uint8_t
     OTHER_REASON = 250
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ExceptionResponse state-error
-// ─────────────────────────────────────────────────────────────────────────────
 enum class ExceptionStateError : uint8_t
 {
     SERVICE_NOT_ALLOWED = 1,
     SERVICE_UNKNOWN = 2
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ExceptionResponse service-error choice tag
-// ─────────────────────────────────────────────────────────────────────────────
 enum class ExceptionServiceError : uint8_t
 {
     OPERATION_NOT_POSSIBLE = 1,
@@ -160,9 +133,6 @@ enum class ExceptionServiceError : uint8_t
     INVOCATION_COUNTER_ERROR = 6
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// High-level discriminator used by the dispatcher / UI layer
-// ─────────────────────────────────────────────────────────────────────────────
 enum class XDlmsDataType
 {
     UNKNOWN,

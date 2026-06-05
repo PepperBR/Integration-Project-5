@@ -17,6 +17,11 @@ target_sources(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/src/test_ActionsRequestVerifier.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/test_ActionsResponseVerifier.cpp
 
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_GetRequestVerifier.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_GetResponseVerifier.cpp
+
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_SetRequestVerifier.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_SetResponseVerifier.cpp
 )
 
 target_link_libraries(${PROJECT_NAME} 

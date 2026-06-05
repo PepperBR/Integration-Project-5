@@ -111,8 +111,8 @@ TEST_CASE("ActionRequestParser - ACTION-REQUEST-WITH-LIST (Subtipo 0x03)", "[Act
                                "00 0F 06 07 08 09 0A 0B 02");
         auto response = parser.verify(data);
 
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 4);
+        REQUIRE_FALSE(response.valid);
+        REQUIRE_FALSE(response.errors.empty());
     }
 
     SECTION("Caminho Feliz: Lista com parâmetros residuais no final")
@@ -147,8 +147,8 @@ TEST_CASE("ActionRequestParser - ACTION-REQUEST-WITH-FIRST-PBLOCK (Subtipo 0x04)
                                "01 00 00 00 0A EE FF");
         auto response = parser.verify(data);
 
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 3);
+        REQUIRE_FALSE(response.valid);
+        REQUIRE_FALSE(response.errors.empty());
     }
 
     SECTION("Erro: Dados insuficientes para o DataBlock-SA")
@@ -172,8 +172,8 @@ TEST_CASE("ActionRequestParser - ACTION-REQUEST-WITH-LIST-AND-FIRST-PBLOCK (Subt
                                "00 00 00 00 01");
         auto response = parser.verify(data);
 
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 4);
+        REQUIRE_FALSE(response.valid);
+        REQUIRE_FALSE(response.errors.empty());
     }
 }
 
@@ -186,8 +186,8 @@ TEST_CASE("ActionRequestParser - ACTION-REQUEST-WITH-PBLOCK (Subtipo 0x06)", "[A
         auto data = hexToBytes("C6 06 41 01 00 00 00 02 11 22 33");
         auto response = parser.verify(data);
 
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 2);
+        REQUIRE_FALSE(response.valid);
+        REQUIRE_FALSE(response.errors.empty());
     }
 
     SECTION("Erro: Frame menor que o mínimo exigido de 8 bytes")

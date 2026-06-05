@@ -32,10 +32,15 @@ target_sources(${PROJECT_NAME}_lib
         ${CMAKE_CURRENT_SOURCE_DIR}/src/server/server.cpp
         
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ParseHeader.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/REQUEST/GetRequestParser.cpp
 
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/REQUEST/ActionRequestParser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/RESPONSE/ActionResponseParser.cpp
+
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/REQUEST/GetRequestParser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/GET/RESPONSE/GetResponseParser.cpp
+
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/REQUEST/SetRequestParser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/RESPONSE/SetResponseParser.cpp
 
         ${GURUX_SOURCES}
 )

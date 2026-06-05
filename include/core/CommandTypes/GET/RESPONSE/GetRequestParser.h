@@ -6,18 +6,17 @@
 #include <variant>
 #include <vector>
 
-class SetResponseParser
+class GetRequestParser
 {
 public:
     static auto verify(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
 
 private:
     static auto verifyNormal(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
-    static auto verifyDatablock(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
-    static auto verifyLastDatablock(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
-    static auto verifyLastDatabockWithList(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
+    static auto verifyNext(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
     static auto verifyWithList(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
 
-    static auto parseDataAccessResult(uint8_t value, size_t offset) -> std::variant<ParsedField, ValidationError>;
+    static auto Cosem_Attribute_Descriptor(const std::vector<uint8_t> &data) -> std::variant<ParsedField, ValidationError>;
+
     static auto buildHeader(const std::vector<uint8_t> &data, VerifyFrameResponse &response) -> bool;
 };

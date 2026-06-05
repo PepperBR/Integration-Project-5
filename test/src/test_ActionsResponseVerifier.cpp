@@ -95,8 +95,8 @@ TEST_CASE("ActionResponseParser - ACTION-RESPONSE-WITH-PBLOCK (Subtipo 0x02)", "
         auto data = hexToBytes("C7 02 41 01 00 00 00 02 11 22");
         auto response = parser.verify(data);
 
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 2);
+        REQUIRE_FALSE(response.valid);
+        REQUIRE_FALSE(response.errors.empty());
     }
 
     SECTION("Erro: Frame muito curto para conter a estrutura mínima de um pblock")

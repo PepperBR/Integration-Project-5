@@ -20,8 +20,6 @@ private:
     static auto verifyWithPblock(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
 
     static auto parseCosemMethodDescriptor(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>;
-
     static auto parseDataBlockSA(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>;
-
     static auto buildHeader(const std::vector<uint8_t> &data, VerifyFrameResponse &response) -> bool;
 };

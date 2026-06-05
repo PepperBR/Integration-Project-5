@@ -6,16 +6,6 @@
 #include <variant>
 #include <vector>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ACTION-Response parser
-//
-// Action-Response ::= CHOICE {
-//   [1] action-response-normal
-//   [2] action-response-with-pblock
-//   [3] action-response-with-list
-//   [4] action-response-next-pblock
-// }
-// ─────────────────────────────────────────────────────────────────────────────
 class ActionResponseParser
 {
 public:
@@ -27,9 +17,7 @@ private:
     static auto verifyWithList(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
     static auto verifyNextPblock(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
 
-    static auto parseActionResult(uint8_t value) -> std::variant<ParsedField, ValidationError>;
-
+    static auto parseActionResult(uint8_t value, size_t offset) -> std::variant<ParsedField, ValidationError>;
     static auto parseDataBlockSA(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>;
-
     static auto buildHeader(const std::vector<uint8_t> &data, VerifyFrameResponse &response) -> bool;
 };

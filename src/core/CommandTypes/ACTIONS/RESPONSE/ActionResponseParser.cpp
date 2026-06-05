@@ -1,5 +1,4 @@
 #include "core/CommandTypes/ACTIONS/RESPONSE/ActionResponseParser.h"
-
 #include "core/enums.h"
 #include <sstream>
 #include <string>
@@ -50,7 +49,7 @@ auto ActionResponseParser::verify(const std::vector<uint8_t> &data) -> VerifyFra
     }
 }
 
-auto ActionResponseParser::parseActionResult(uint8_t value) -> std::variant<ParsedField, ValidationError>
+auto ActionResponseParser::parseActionResult(uint8_t value, size_t offset) -> std::variant<ParsedField, ValidationError>
 {
     struct Entry
     {
@@ -76,27 +75,38 @@ auto ActionResponseParser::parseActionResult(uint8_t value) -> std::variant<Pars
     for (const auto &e : table)
     {
         if (e.code == value)
-            return ParsedField{"Action-Result", 3, 1, std::to_string(value), e.label};
+            return ParsedField{"Action-Result", static_cast<int>(offset), 1, std::to_string(value), e.label};
     }
     return ValidationError{2, "Action-Result desconhecido: " + std::to_string(value), ""};
 }
 
 auto ActionResponseParser::parseDataBlockSA(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>
 {
-    if (offset + 5 > data.size())
-        return ValidationError{1, "DataBlock-SA (pblock) incompleto.", ""};
+    if (offset + 6 > data.size())
+        return ValidationError{1, "DataBlock-SA (pblock) incompleto ou sem definicao de tamanho.", ""};
 
     bool lastBlock = data[offset] != 0x00;
 
     uint32_t blockNumber = (static_cast<uint32_t>(data[offset + 1]) << 24) | (static_cast<uint32_t>(data[offset + 2]) << 16) |
                            (static_cast<uint32_t>(data[offset + 3]) << 8) | static_cast<uint32_t>(data[offset + 4]);
 
-    size_t rawLen = data.size() - offset - 5;
+    size_t lengthOffset = offset + 5;
+    uint8_t declaredBlockLen = data[lengthOffset];
+    size_t actualBlockLen = data.size() - (lengthOffset + 1);
+
+    if (actualBlockLen != declaredBlockLen)
+    {
+        return ValidationError{2,
+                               "Erro estrutural no DataBlock-SA (pblock): Tamanho declarado (" + std::to_string(declaredBlockLen) +
+                                   " bytes) difere dos bytes reais recebidos (" + std::to_string(actualBlockLen) + " bytes).",
+                               ""};
+    }
 
     std::ostringstream oss;
-    oss << "LastBlock: " << (lastBlock ? "true" : "false") << ", BlockNumber: " << blockNumber << ", RawData: " << rawLen << " bytes";
+    oss << "LastBlock: " << (lastBlock ? "true" : "false") << ", BlockNumber: " << blockNumber << ", RawData: " << actualBlockLen << " bytes";
 
-    return ParsedField{"DataBlock-SA (pblock)", static_cast<int>(offset), static_cast<int>(data.size() - offset), oss.str(),
+    size_t totalBlockSize = data.size() - offset;
+    return ParsedField{"DataBlock-SA (pblock)", static_cast<int>(offset), static_cast<int>(totalBlockSize), oss.str(),
                        "Bloco de dados para ACTION (last-block, block-number, raw-data)"};
 }
 
@@ -108,15 +118,14 @@ auto ActionResponseParser::verifyNormal(const std::vector<uint8_t> &data) -> Ver
     if (!buildHeader(data, response))
         return response;
 
-    constexpr size_t minimumSize = 4;
-    if (data.size() < minimumSize)
+    if (data.size() < 4)
     {
         response.valid = false;
         response.errors.push_back({1, "ACTION-RESPONSE-NORMAL incompleto.", ""});
         return response;
     }
 
-    auto resultField = parseActionResult(data[3]);
+    auto resultField = parseActionResult(data[3], 3);
     if (std::holds_alternative<ValidationError>(resultField))
     {
         response.valid = false;
@@ -125,44 +134,76 @@ auto ActionResponseParser::verifyNormal(const std::vector<uint8_t> &data) -> Ver
     }
     response.fields.push_back(std::get<ParsedField>(resultField));
 
-    if (data.size() > 4)
+    size_t offset = 4;
+    if (data.size() > offset)
     {
-        uint8_t hasReturn = data[4];
+        uint8_t hasReturn = data[offset];
         if (hasReturn == 0x00)
         {
-            response.fields.push_back({"Return-Parameters", 4, 1, "0", "Sem parâmetros de retorno"});
+            response.fields.push_back({"Return-Parameters", static_cast<int>(offset), 1, "0", "Sem parâmetros de retorno"});
+            offset++;
         }
         else if (hasReturn == 0x01)
         {
-            response.fields.push_back({"Return-Parameters", 4, 1, "1", "Parâmetros de retorno presentes"});
+            response.fields.push_back({"Return-Parameters", static_cast<int>(offset), 1, "1", "Parâmetros de retorno presentes"});
+            offset++;
 
-            if (data.size() > 5)
+            if (offset >= data.size())
             {
-                uint8_t choiceTag = data[5];
-                if (choiceTag == 0x00)
+                response.valid = false;
+                response.errors.push_back({1, "ACTION-RESPONSE-NORMAL invalido: Get-Data-Result ausente.", ""});
+                return response;
+            }
+
+            uint8_t choiceTag = data[offset];
+            if (choiceTag == 0x00)
+            {
+                size_t payloadLen = data.size() - (offset + 1);
+                response.fields.push_back({"Get-Data-Result (Data)", static_cast<int>(offset), static_cast<int>(payloadLen + 1),
+                                           std::to_string(payloadLen) + " bytes", "Dados de retorno da ação"});
+                offset = data.size();
+            }
+            else if (choiceTag == 0x01)
+            {
+                if (offset + 1 >= data.size())
                 {
-                    size_t payloadLen = data.size() - 6;
-                    response.fields.push_back({"Get-Data-Result (Data)", 5, static_cast<int>(payloadLen + 1), std::to_string(payloadLen) + " bytes",
-                                               "Dados de retorno da ação"});
+                    response.valid = false;
+                    response.errors.push_back({1, "ACTION-RESPONSE-NORMAL invalido: Data-Access-Result do choice ausente.", ""});
+                    return response;
                 }
-                else if (choiceTag == 0x01 && data.size() > 6)
+
+                auto dar = parseActionResult(data[offset + 1], offset + 1);
+                if (std::holds_alternative<ValidationError>(dar))
                 {
-                    auto dar = parseActionResult(data[6]);
-                    if (std::holds_alternative<ParsedField>(dar))
-                    {
-                        auto f = std::get<ParsedField>(dar);
-                        f.name = "Get-Data-Result (Data-Access-Result)";
-                        f.offset = 6;
-                        response.fields.push_back(f);
-                    }
+                    response.valid = false;
+                    response.errors.push_back(std::get<ValidationError>(dar));
+                    return response;
                 }
+
+                auto f = std::get<ParsedField>(dar);
+                f.name = "Get-Data-Result (Data-Access-Result)";
+                response.fields.push_back(f);
+                offset += 2;
+            }
+            else
+            {
+                response.valid = false;
+                response.errors.push_back({3, "Tag de escolha de Get-Data-Result invalida: " + std::to_string(choiceTag), ""});
+                return response;
             }
         }
         else
         {
             response.valid = false;
-            response.errors.push_back({3, "Indicador de Return-Parameters inválido.", ""});
+            response.errors.push_back({3, "Indicador de Return-Parameters inválido: " + std::to_string(hasReturn), ""});
+            return response;
         }
+    }
+
+    if (offset < data.size())
+    {
+        response.valid = false;
+        response.errors.push_back({2, "Erro estrutural: Bytes extras detectados ao final do frame ACTION-RESPONSE-NORMAL.", ""});
     }
 
     return response;
@@ -176,7 +217,7 @@ auto ActionResponseParser::verifyWithPblock(const std::vector<uint8_t> &data) ->
     if (!buildHeader(data, response))
         return response;
 
-    if (data.size() < 8)
+    if (data.size() < 9)
     {
         response.valid = false;
         response.errors.push_back({1, "ACTION-RESPONSE-WITH-PBLOCK incompleto.", ""});
@@ -224,7 +265,8 @@ auto ActionResponseParser::verifyWithList(const std::vector<uint8_t> &data) -> V
             response.errors.push_back({1, "Lista de respostas truncada no índice " + std::to_string(i), ""});
             return response;
         }
-        auto resultField = parseActionResult(data[offset]);
+
+        auto resultField = parseActionResult(data[offset], offset);
         if (std::holds_alternative<ValidationError>(resultField))
         {
             response.valid = false;
@@ -233,17 +275,20 @@ auto ActionResponseParser::verifyWithList(const std::vector<uint8_t> &data) -> V
         }
         auto f = std::get<ParsedField>(resultField);
         f.name = "Action-Result[" + std::to_string(i) + "]";
-        f.offset = static_cast<int>(offset);
         response.fields.push_back(f);
         offset++;
 
-        if (offset < data.size())
+        if (offset >= data.size())
         {
-            uint8_t hasReturn = data[offset++];
-            ParsedField rf{"Return-Parameters[" + std::to_string(i) + "]", static_cast<int>(offset - 1), 1, std::to_string(hasReturn),
-                           hasReturn ? "Parâmetros de retorno presentes" : "Sem parâmetros de retorno"};
-            response.fields.push_back(rf);
+            response.valid = false;
+            response.errors.push_back({1, "Indicador Return-Parameters ausente na lista no índice " + std::to_string(i), ""});
+            return response;
         }
+
+        uint8_t hasReturn = data[offset++];
+        ParsedField rf{"Return-Parameters[" + std::to_string(i) + "]", static_cast<int>(offset - 1), 1, std::to_string(hasReturn),
+                       hasReturn ? "Parâmetros de retorno presentes" : "Sem parâmetros de retorno"};
+        response.fields.push_back(rf);
     }
 
     return response;
@@ -268,6 +313,12 @@ auto ActionResponseParser::verifyNextPblock(const std::vector<uint8_t> &data) ->
                            static_cast<uint32_t>(data[6]);
 
     response.fields.push_back({"Block-Number", 3, 4, std::to_string(blockNumber), "Número do próximo pblock solicitado pelo servidor"});
+
+    if (data.size() > 7)
+    {
+        response.valid = false;
+        response.errors.push_back({2, "Erro estrutural: Bytes extras detectados ao final do frame ACTION-RESPONSE-NEXT-PBLOCK.", ""});
+    }
 
     return response;
 }

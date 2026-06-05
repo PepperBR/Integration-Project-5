@@ -1,9 +1,14 @@
 #include "core/XDlms.h"
 #include "core/CommandTypes/ACTIONS/REQUEST/ActionRequestParser.h"
+#include "core/CommandTypes/ACTIONS/RESPONSE/ActionResponseParser.h"
 #include "core/CommandTypes/GET/REQUEST/GetRequestParser.h"
+#include "core/CommandTypes/GET/RESPONSE/GetResponseParser.h"
+#include "core/CommandTypes/SET/REQUEST/SetRequestParser.h"
+#include "core/CommandTypes/SET/RESPONSE/SetResponseParser.h"
 #include <iomanip>
 #include <list>
 #include <sstream>
+
 auto XDlms::decode(const std::vector<uint8_t> &data) -> VerifyFrameResponse
 {
     if (data.size() < 4)
@@ -31,16 +36,16 @@ auto XDlms::verify_command(XDlmsDataType commandType, const std::vector<uint8_t>
     {
     case XDlmsDataType::GET_REQUEST:
         return GetRequestParser::verify(data);
-        // case XDlmsDataType::GET_RESPONSE:
-        //     return GetResponseParser::verify(data);
-        // case XDlmsDataType::SET_REQUEST:
-        //     return SetRequestParser::verify(data);
-        // case XDlmsDataType::SET_RESPONSE:
-        //     return SetResponseParser::verify(data);
+    case XDlmsDataType::GET_RESPONSE:
+        return GetResponseParser::verify(data);
+    case XDlmsDataType::SET_REQUEST:
+        return SetRequestParser::verify(data);
+    case XDlmsDataType::SET_RESPONSE:
+        return SetResponseParser::verify(data);
     case XDlmsDataType::ACTION_REQUEST:
         return ActionRequestParser::verify(data);
-    // case XDlmsDataType::ACTION_RESPONSE:
-    //     return ActionResponseParser::verify(data);
+    case XDlmsDataType::ACTION_RESPONSE:
+        return ActionResponseParser::verify(data);
     default:
         VerifyFrameResponse response;
         response.valid = false;
@@ -72,7 +77,6 @@ auto XDlms::to_hex_string(const unsigned char *bytes, int length) -> std::string
 
 auto XDlms::identifier_x_dlms_data_type(uint8_t data) -> XDlmsDataType
 {
-    // Realiza o cast do byte puro diretamente para o enum fortemente tipado
     auto tag = static_cast<XDlmsApduTag>(data);
 
     switch (tag)

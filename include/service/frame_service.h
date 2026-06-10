@@ -12,7 +12,8 @@ namespace os = frame::v1;
 class FrameService final : public os::FrameService::Service
 {
 public:
-    grpc::Status VerifyFrame(grpc::ServerContext *context, const os::VerifyFrameRequest *request, os::VerifyFrameResponse *response) override;
+    grpc::Status VerifyFrame(grpc::ServerContext *context, const os::VerifyFrameRequestProto *request,
+                             os::VerifyFrameResponseProto *response) override;
 
 private:
     template <typename Request, typename Response>

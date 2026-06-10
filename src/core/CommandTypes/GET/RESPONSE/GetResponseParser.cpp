@@ -1,161 +1,108 @@
 #include "core/CommandTypes/GET/RESPONSE/GetResponseParser.h"
 #include "core/enums.h"
+#include "core/utils/CosemDataParser.h"
+#include "core/utils/DlmsFrameUtils.h"
+
+#include <iomanip>
 #include <sstream>
 #include <string>
-#include <variant>
 
-auto GetResponseParser::verify(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+static constexpr size_t PAYLOAD_OFFSET = DlmsFrameUtils::APDU_PAYLOAD_OFFSET;
+static constexpr size_t BLOCK_NUMBER_SIZE = DlmsFrameUtils::DATABLOCK_BLOCK_NUMBER_SIZE;
+static constexpr size_t LAST_BLOCK_SIZE = DlmsFrameUtils::DATABLOCK_LAST_BLOCK_SIZE;
+static constexpr size_t RESULT_TAG_SIZE = 1;
+static constexpr size_t DATABLOCK_G_HEADER_SIZE = LAST_BLOCK_SIZE + BLOCK_NUMBER_SIZE + RESULT_TAG_SIZE;
+
+auto GetResponseParser::buildHeader(const std::vector<uint8_t> &data, FrameResponse &response) -> bool
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    return DlmsFrameUtils::buildHeader(data, response);
+}
 
-    if (data.size() < 3)
+auto GetResponseParser::verify(const std::vector<uint8_t> &data) -> FrameResponse
+{
+    FrameResponse response;
+    response.fields.identifier = "get-response";
+    response.fields.name = "Get-Response";
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
+
+    constexpr size_t MIN_FRAME_SIZE = DlmsFrameUtils::APDU_PAYLOAD_OFFSET;
+    if (data.size() < MIN_FRAME_SIZE)
     {
-        response.valid = false;
-        response.errors.push_back({0, "Frame GET-RESPONSE muito curto.", ""});
+        response.error.emplace(Error{"Frame GET-RESPONSE muito curto."});
         return response;
     }
 
-    auto serviceType = static_cast<ServiceType>(data[1]);
-    auto invokeInfo = ParseHeader::decodeInvokeField(data[2]);
-
-    auto headerResult = ParseHeader::parse_header(serviceType, invokeInfo.priority, invokeInfo.serviceClass);
-
-    if (std::holds_alternative<ValidationError>(headerResult))
-    {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(headerResult));
-        return response;
-    }
-    response.fields.push_back(std::get<ParsedField>(headerResult));
-
-    switch (data[1])
+    switch (data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])
     {
     case 0x01:
         return verifyNormal(data);
     case 0x02:
         return verifyWithDatablock(data);
     case 0x03:
-        return verifyWithList(data);
+        response.error.emplace(Error{"GET-RESPONSE-WITH-LIST desconhecido: " + std::to_string(data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])});
+        return response;
     default:
-        response.valid = false;
-        response.errors.push_back({1, "Sub-tipo de GET-RESPONSE desconhecido: " + std::to_string(data[1]), ""});
+        response.error.emplace(Error{"Sub-tipo de GET-RESPONSE desconhecido: " + std::to_string(data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])});
         return response;
     }
 }
 
-auto GetResponseParser::verifyNormal(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto GetResponseParser::verifyNormal(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "get-response-normal";
+    response.fields.name = "Get-Response-Normal";
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
 
-    constexpr size_t minimumSize = 4;
+    if (!buildHeader(data, response))
+        return response;
+
+    constexpr size_t minimumSize = PAYLOAD_OFFSET + 1;
     if (data.size() < minimumSize)
     {
-        response.valid = false;
-        response.errors.push_back({1, "GET-RESPONSE-NORMAL incompleto.", ""});
+        response.error.emplace(Error{"GET-RESPONSE-NORMAL incompleto."});
         return response;
     }
 
-    auto result = parseGetDataResult(data, 3);
-    if (std::holds_alternative<ValidationError>(result))
+    auto result = parseGetDataResult(data, PAYLOAD_OFFSET);
+    if (std::holds_alternative<Error>(result))
     {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(result));
+        response.error.emplace(std::get<Error>(result));
         return response;
     }
 
-    response.fields.push_back(std::get<ParsedField>(result));
-
-    // CORREÇÃO: Validação de fim de frame baseada no consumo real calculado dinamicamente
-    size_t consumed = static_cast<size_t>(std::get<ParsedField>(result).offset) + std::get<ParsedField>(result).length;
-    if (consumed < data.size())
-    {
-        response.valid = false;
-        response.errors.push_back({2, "Erro estrutural: Bytes extras detectados ao final do frame GET-RESPONSE-NORMAL.", ""});
-    }
-
+    response.fields.values.push_back(std::get<ParsedField>(result));
     return response;
 }
 
-auto GetResponseParser::verifyWithList(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto GetResponseParser::verifyWithDatablock(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "get-response-with-datablock";
+    response.fields.name = "Get-Response-With-Datablock";
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
 
-    if (data.size() < 4)
-    {
-        response.valid = false;
-        response.errors.push_back({1, "GET-RESPONSE-WITH-LIST incompleto. Ausencia do contador de elementos.", ""});
+    if (!buildHeader(data, response))
         return response;
-    }
 
-    uint8_t count = data[3];
-    response.fields.push_back({"Response-List Count", 3, 1, std::to_string(count), "Numero de resultados na lista"});
-
-    size_t offset = 4;
-
-    for (uint8_t i = 0; i < count; ++i)
-    {
-        if (offset >= data.size())
-        {
-            response.valid = false;
-            response.errors.push_back({1, "Lista de respostas truncada antes de processar o indice " + std::to_string(i), ""});
-            return response;
-        }
-
-        auto result = parseGetDataResult(data, offset);
-        if (std::holds_alternative<ValidationError>(result))
-        {
-            response.valid = false;
-            response.errors.push_back(std::get<ValidationError>(result));
-            return response;
-        }
-
-        auto field = std::get<ParsedField>(result);
-        field.name = "Get-Data-Result[" + std::to_string(i) + "]";
-        response.fields.push_back(field);
-
-        offset += field.length;
-    }
-
-    if (offset < data.size())
-    {
-        response.valid = false;
-        response.errors.push_back({2, "Erro estrutural: Bytes extras detectados ao final do frame GET-RESPONSE-WITH-LIST.", ""});
-    }
-
-    return response;
-}
-
-auto GetResponseParser::verifyWithDatablock(const std::vector<uint8_t> &data) -> VerifyFrameResponse
-{
-    VerifyFrameResponse response;
-    response.valid = true;
-
-    constexpr size_t minimumSize = 9;
+    // Mínimo: header(3) + datablock_g_header(6) = 9
+    constexpr size_t minimumSize = PAYLOAD_OFFSET + DATABLOCK_G_HEADER_SIZE;
     if (data.size() < minimumSize)
     {
-        response.valid = false;
-        response.errors.push_back({1, "GET-RESPONSE-WITH-DATABLOCK incompleto.", ""});
+        response.error.emplace(Error{"GET-RESPONSE-WITH-DATABLOCK incompleto."});
         return response;
     }
 
-    auto result = parseDataBlockG(data, 3);
-    if (std::holds_alternative<ValidationError>(result))
-    {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(result));
-    }
+    auto result = parseDataBlockG(data, PAYLOAD_OFFSET);
+    if (std::holds_alternative<Error>(result))
+        response.error.emplace(std::get<Error>(result));
     else
-    {
-        response.fields.push_back(std::get<ParsedField>(result));
-    }
+        response.fields.values.push_back(std::get<ParsedField>(result));
 
     return response;
 }
 
-auto GetResponseParser::parseDataAccessResult(uint8_t value, size_t offset) -> std::variant<ParsedField, ValidationError>
+auto GetResponseParser::parseDataAccessResult(uint8_t value, size_t /*offset*/) -> std::variant<ParsedField, Error>
 {
     struct Entry
     {
@@ -184,163 +131,128 @@ auto GetResponseParser::parseDataAccessResult(uint8_t value, size_t offset) -> s
     for (const auto &e : table)
     {
         if (e.code == value)
-            return ParsedField{"Data-Access-Result", static_cast<int>(offset), 1, std::to_string(value), e.label};
-    }
-    return ValidationError{2, "Data-Access-Result desconhecido: " + std::to_string(value), ""};
-}
-
-static auto calculateCosemDataLength(const std::vector<uint8_t> &data, size_t &currentOffset) -> bool
-{
-    if (currentOffset >= data.size())
-        return false;
-
-    uint8_t tag = data[currentOffset++];
-
-    if (tag == 0x01 || tag == 0x02)
-    {
-        if (currentOffset >= data.size())
-            return false;
-        uint8_t elementCount = data[currentOffset++];
-
-        for (uint8_t i = 0; i < elementCount; ++i)
         {
-            if (!calculateCosemDataLength(data, currentOffset))
-                return false;
+            ParsedField f;
+            f.identifier = "data-access-result";
+            f.name = "Data-Access-Result";
+            f.value_bytes = e.label;
+            return f;
         }
-        return true;
     }
-
-    if (tag == 0x09 || tag == 0x0A)
-    {
-        if (currentOffset >= data.size())
-            return false;
-        uint8_t length = data[currentOffset++];
-        currentOffset += length;
-        return currentOffset <= data.size();
-    }
-
-    size_t fixedSize = 0;
-    switch (tag)
-    {
-    case 0x03:
-        fixedSize = 1;
-        break;
-    case 0x04:
-        fixedSize = 1;
-        break;
-    case 0x05:
-        fixedSize = 4;
-        break;
-    case 0x06:
-        fixedSize = 4;
-        break;
-    case 0x0F:
-        fixedSize = 1;
-        break;
-    case 0x10:
-        fixedSize = 2;
-        break;
-    case 0x11:
-        fixedSize = 1;
-        break;
-    case 0x12:
-        fixedSize = 2;
-        break;
-    case 0x14:
-        fixedSize = 8;
-        break;
-    case 0x15:
-        fixedSize = 8;
-        break;
-    case 0x16:
-        fixedSize = 1;
-        break;
-    default:
-        fixedSize = 0;
-        break;
-    }
-
-    currentOffset += fixedSize;
-    return currentOffset <= data.size();
+    return Error{"Data-Access-Result desconhecido: " + std::to_string(value)};
 }
 
-auto GetResponseParser::parseGetDataResult(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>
+auto GetResponseParser::parseGetDataResult(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, Error>
 {
     if (offset >= data.size())
-        return ValidationError{1, "Get-Data-Result ausente.", ""};
+        return Error{"Get-Data-Result ausente."};
+
+    constexpr uint8_t CHOICE_DATA    = 0x00;
+    constexpr uint8_t CHOICE_ERROR   = 0x01;
+    constexpr size_t  CHOICE_TAG_SIZE = 1;
+    constexpr size_t  DAR_SIZE        = 1;
 
     uint8_t choiceTag = data[offset];
 
-    if (choiceTag == 0x00)
+    ParsedField field;
+    field.identifier = "result";
+    field.name       = "Get-Data-Result";
+
+    if (choiceTag == CHOICE_DATA)
     {
-        size_t inspectOffset = offset + 1;
+        // Decodifica a estrutura COSEM Data de forma recursiva e hierárquica
+        size_t dataEnd = offset + CHOICE_TAG_SIZE;
+        auto dataResult = CosemDataParser::parse(data, dataEnd, dataEnd);
 
-        // Executa o motor dinâmico de parsing DLMS
-        if (!calculateCosemDataLength(data, inspectOffset))
-        {
-            return ValidationError{1, "Erro estrutural: Payload de dados complexos esta incompleto ou corrompido.", ""};
-        }
+        if (std::holds_alternative<Error>(dataResult))
+            return std::get<Error>(dataResult);
 
-        size_t totalFieldLen = inspectOffset - offset;
-        size_t payloadLen = totalFieldLen - 1;
-
-        return ParsedField{"Get-Data-Result", static_cast<int>(offset), static_cast<int>(totalFieldLen), "Data",
-                           "Dados presentes (Estrutura DLMS dinamica com " + std::to_string(payloadLen) + " bytes consumidos)"};
+        auto dataField = std::get<ParsedField>(dataResult);
+        field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, CHOICE_TAG_SIZE); // choice tag (0x00 = Data)
+        field.values.push_back(std::move(dataField));
+        return field;
     }
-    else if (choiceTag == 0x01)
+    else if (choiceTag == CHOICE_ERROR)
     {
-        if (offset + 1 >= data.size())
-            return ValidationError{1, "Data-Access-Result ausente após tag de choice.", ""};
+        size_t darOffset = offset + CHOICE_TAG_SIZE;
+        if (darOffset >= data.size())
+            return Error{"Data-Access-Result ausente após tag de choice."};
 
-        auto darResult = parseDataAccessResult(data[offset + 1], offset + 1);
-        if (std::holds_alternative<ValidationError>(darResult))
+        auto darResult = parseDataAccessResult(data[darOffset], darOffset);
+        if (std::holds_alternative<Error>(darResult))
             return darResult;
 
-        auto field = std::get<ParsedField>(darResult);
-        field.length = 2;
-        field.offset = static_cast<int>(offset);
+        auto darField = std::get<ParsedField>(darResult);
+        field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, CHOICE_TAG_SIZE); // choice tag (0x01 = Error)
+        field.values.push_back(std::move(darField));
         return field;
     }
 
-    return ValidationError{1, "Tag de Get-Data-Result inválida: " + std::to_string(choiceTag), ""};
+    return Error{"Tag de Get-Data-Result inválida: " + std::to_string(choiceTag)};
 }
 
-auto GetResponseParser::parseDataBlockG(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>
+auto GetResponseParser::parseDataBlockG(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, Error>
 {
-    if (offset + 5 >= data.size())
-        return ValidationError{1, "DataBlock-G incompleto.", ""};
+    constexpr size_t resultTagRelOffset = LAST_BLOCK_SIZE + BLOCK_NUMBER_SIZE;
+    constexpr size_t rawDataRelOffset = resultTagRelOffset + RESULT_TAG_SIZE;
 
-    bool lastBlock = data[offset] != 0x00;
+    if (offset + DATABLOCK_G_HEADER_SIZE > data.size())
+        return Error{"DataBlock-G incompleto."};
 
-    uint32_t blockNumber = (static_cast<uint32_t>(data[offset + 1]) << 24) | (static_cast<uint32_t>(data[offset + 2]) << 16) |
-                           (static_cast<uint32_t>(data[offset + 3]) << 8) | static_cast<uint32_t>(data[offset + 4]);
+    const size_t lastBlockAbs = offset;
+    const size_t blockNumberAbs = offset + LAST_BLOCK_SIZE;
+    const size_t resultTagAbs = offset + resultTagRelOffset;
+    const size_t rawDataAbs = offset + rawDataRelOffset;
 
-    uint8_t resultTag = data[offset + 5];
+    bool lastBlock = data[lastBlockAbs] != 0x00;
+    uint32_t blockNumber = DlmsFrameUtils::read_uint32_be(data, blockNumberAbs);
+    uint8_t resultTag = data[resultTagAbs];
 
-    std::ostringstream oss;
-    oss << "LastBlock: " << (lastBlock ? "true" : "false") << ", BlockNumber: " << blockNumber;
+    ParsedField lastBlockField;
+    lastBlockField.identifier = "last-block";
+    lastBlockField.name = "Last-Block";
+    lastBlockField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, lastBlockAbs, LAST_BLOCK_SIZE);
 
-    if (resultTag == 0x00)
+    ParsedField blockNumberField;
+    blockNumberField.identifier = "block-number";
+    blockNumberField.name = "Block-Number";
+    blockNumberField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, blockNumberAbs, BLOCK_NUMBER_SIZE);
+
+    ParsedField resultField;
+    resultField.identifier = "result";
+    resultField.name = "Result";
+
+    constexpr uint8_t RESULT_DATA = 0x00;
+    constexpr uint8_t RESULT_ERROR = 0x01;
+
+    if (resultTag == RESULT_DATA)
     {
-        size_t rawLen = data.size() - offset - 6;
-        oss << ", Result: raw-data (" << rawLen << " bytes)";
+        size_t rawLen = data.size() - rawDataAbs;
+        resultField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, resultTagAbs, RESULT_TAG_SIZE); // result tag
     }
-    else if (resultTag == 0x01)
+    else if (resultTag == RESULT_ERROR)
     {
-        if (offset + 6 >= data.size())
-            return ValidationError{1, "Data-Access-Result ausente em DataBlock-G.", ""};
-
-        auto dar = parseDataAccessResult(data[offset + 6], offset + 6);
-        if (std::holds_alternative<ValidationError>(dar))
+        if (rawDataAbs > data.size())
+            return Error{"Data-Access-Result ausente em DataBlock-G."};
+        auto dar = parseDataAccessResult(data[rawDataAbs], rawDataAbs);
+        if (std::holds_alternative<Error>(dar))
             return dar;
-
-        oss << ", Result: " << std::get<ParsedField>(dar).value;
+        auto darField = std::get<ParsedField>(dar);
+        resultField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, resultTagAbs, RESULT_TAG_SIZE); // result tag
+        resultField.values.push_back(std::move(darField));
     }
     else
     {
-        return ValidationError{1, "Tag de result em DataBlock-G inválida: " + std::to_string(resultTag), ""};
+        return Error{"Tag de result em DataBlock-G inválida: " + std::to_string(resultTag)};
     }
 
-    return ParsedField{"DataBlock-G", static_cast<int>(offset), static_cast<int>(data.size() - offset), oss.str(),
-                       "Bloco de dados GET (last-block, block-number, result)"};
+    ParsedField field;
+    field.identifier = "datablock-g";
+    field.name = "DataBlock-G";
+    field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, LAST_BLOCK_SIZE + BLOCK_NUMBER_SIZE + RESULT_TAG_SIZE); // last-block+block-num+result-tag
+    field.values.push_back(std::move(lastBlockField));
+    field.values.push_back(std::move(blockNumberField));
+    field.values.push_back(std::move(resultField));
+
+    return field;
 }

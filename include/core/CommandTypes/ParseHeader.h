@@ -3,7 +3,9 @@
 #include "core/CommonVerifierTypes.h"
 #include "core/enums.h"
 
+#include <cstdint>
 #include <variant>
+#include <vector>
 
 struct InvokeIdAndPriority
 {
@@ -21,6 +23,5 @@ private:
 
 public:
     static auto decodeInvokeField(uint8_t value) -> InvokeIdAndPriority;
-    static auto parse_header(const ServiceType service_type, const Priority priority, const ServiceClass service_class)
-        -> std::variant<ParsedField, ValidationError>;
+    static auto parse_header(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, Error>;
 };

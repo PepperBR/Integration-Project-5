@@ -1,25 +1,59 @@
 #include "core/CommandTypes/ParseHeader.h"
+#include <iomanip>
+#include <sstream>
 #include <string>
 
-auto ParseHeader::parse_header(const ServiceType service_type, const Priority priority, const ServiceClass service_class)
-    -> std::variant<ParsedField, ValidationError>
+static auto byte_to_hex(uint8_t b) -> std::string
 {
-    if (verify_subType(service_type) && verify_Priority(priority) && verify_ServiceClass(service_class))
-    {
-        return ParsedField{"Header", 0, 3, "Valid Header",
-                           "Cabeçalho APDU válido. Tipo de Serviço: " + std::to_string(static_cast<int>(service_type)) +
-                               ", Prioridade: " + std::to_string(static_cast<int>(priority)) +
-                               ", Classe de Serviço: " + std::to_string(static_cast<int>(service_class))};
-    }
-    else
-    {
-        return ValidationError{0, "Cabeçalho APDU inválido. Verifique os campos de tipo de comando, subtipo, prioridade e classe de serviço.", ""};
-    }
+    std::ostringstream oss;
+    oss << std::setw(2) << std::setfill('0') << std::hex << std::uppercase << static_cast<int>(b);
+    return oss.str();
+}
+
+auto ParseHeader::parse_header(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, Error>
+{
+    if (offset + 1 >= data.size())
+        return Error{"Cabeçalho APDU incompleto: bytes de service-type ou invoke-id-and-priority ausentes."};
+
+    auto serviceType = static_cast<ServiceType>(data[offset]);
+    uint8_t invokeRaw = data[offset + 1];
+    auto invokeInfo = decodeInvokeField(invokeRaw);
+
+    if (!verify_subType(serviceType))
+        return Error{"Cabeçalho APDU inválido. Verifique os campos de tipo de comando, subtipo, prioridade e classe de serviço."};
+    if (!verify_Priority(invokeInfo.priority))
+        return Error{"Cabeçalho APDU inválido. Verifique os campos de tipo de comando, subtipo, prioridade e classe de serviço."};
+    if (!verify_ServiceClass(invokeInfo.serviceClass))
+        return Error{"Cabeçalho APDU inválido. Verifique os campos de tipo de comando, subtipo, prioridade e classe de serviço."};
+
+    ParsedField invokeIdField;
+    invokeIdField.identifier = "invoke-id";
+    invokeIdField.name = "Invoke-Id";
+    invokeIdField.value_bytes = byte_to_hex(invokeInfo.invokeId);
+
+    ParsedField priorityField;
+    priorityField.identifier = "priority";
+    priorityField.name = "Priority";
+    priorityField.value_bytes = (invokeInfo.priority == Priority::HIGH) ? "HIGH" : "NORMAL";
+
+    ParsedField serviceClassField;
+    serviceClassField.identifier = "service-class";
+    serviceClassField.name = "Service-Class";
+    serviceClassField.value_bytes = (invokeInfo.serviceClass == ServiceClass::CONFIRMED) ? "CONFIRMED" : "UNCONFIRMED";
+
+    ParsedField invokeAndPriorityField;
+    invokeAndPriorityField.identifier = "invoke-id-and-priority";
+    invokeAndPriorityField.name = "Invoke-Id-And-Priority";
+    invokeAndPriorityField.value_bytes = byte_to_hex(invokeRaw);
+    invokeAndPriorityField.values.push_back(std::move(invokeIdField));
+    invokeAndPriorityField.values.push_back(std::move(priorityField));
+    invokeAndPriorityField.values.push_back(std::move(serviceClassField));
+
+    return invokeAndPriorityField;
 }
 
 auto ParseHeader::verify_subType(ServiceType subType) -> bool
 {
-
     switch (static_cast<uint8_t>(subType))
     {
     case 0x01:

@@ -1,27 +1,24 @@
 #pragma once
 
-#include <list>
+#include <optional>
 #include <string>
+#include <vector>
 
 struct ParsedField
 {
+    std::string identifier;
     std::string name;
-    int offset;
-    int length;
-    std::string value;
-    std::string description;
+    std::string value_bytes;
+    std::vector<ParsedField> values;
 };
 
-struct ValidationError
+struct Error
 {
-    int offset;
     std::string message;
-    std::string found;
 };
 
-struct VerifyFrameResponse
+struct FrameResponse
 {
-    bool valid;
-    std::list<ParsedField> fields;
-    std::list<ValidationError> errors;
+    ParsedField fields;
+    std::optional<Error> error;
 };

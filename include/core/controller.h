@@ -11,7 +11,5 @@ namespace os = frame::v1;
 class Controller
 {
 public:
-    static grpc::Status HandleVerifyFrame(grpc::ServerContext *context, const os::VerifyFrameRequest *request, os::VerifyFrameResponse *response);
-
-    static void HandleFrameToProto(const os::VerifyFrameRequest *frame, os::VerifyFrameResponse *proto_frame);
+    static grpc::Status HandleVerifyFrame(const os::VerifyFrameRequestProto *request, os::VerifyFrameResponseProto *response);
 };

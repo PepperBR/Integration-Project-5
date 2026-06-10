@@ -2,29 +2,26 @@ syntax = "proto3";
 
 package frame.v1;
 
-message ParsedField {
-    string name = 1;
-    uint32 offset = 2;
-    uint32 length = 3;
-    string value = 4;
-    string description = 5;
+message ParsedFieldProto {
+    string identifier = 1;
+    string name = 2;
+    string value_bytes = 3;
+    repeated ParsedFieldProto values = 4;
 }
 
-message ValidationError {
-    uint32 code = 1;
-    string message = 2;
+message ErrorProto {
+    string message = 1;
 }
 
-message VerifyFrameRequest {
+message VerifyFrameRequestProto {
     string raw_frame = 1;
 }
 
-message VerifyFrameResponse {
-    bool valid = 1;
-    repeated ParsedField fields = 2;
-    repeated ValidationError errors = 3;
+message VerifyFrameResponseProto {
+    ParsedFieldProto fields = 1;
+    optional ErrorProto error = 2;
 }
 
 service FrameService {
-    rpc VerifyFrame(VerifyFrameRequest) returns (VerifyFrameResponse);
+    rpc VerifyFrame(VerifyFrameRequestProto) returns (VerifyFrameResponseProto);
 }

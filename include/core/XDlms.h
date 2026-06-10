@@ -10,9 +10,8 @@ class XDlms
 {
 private:
     static auto to_hex_string(const unsigned char *bytes, int length) -> std::string;
-    static auto verify_command(XDlmsDataType commandType, const std::vector<uint8_t> &data) -> VerifyFrameResponse;
-    static auto identifier_x_dlms_data_type(uint8_t data) -> XDlmsDataType;
+    static auto verify_command(XDlmsApduTag commandType, const std::vector<uint8_t> &data, const int offset) -> FrameResponse;
 
 public:
-    static auto decode(const std::vector<uint8_t> &data) -> VerifyFrameResponse;
+    static auto decode(const std::vector<uint8_t> &data) -> FrameResponse;
 };

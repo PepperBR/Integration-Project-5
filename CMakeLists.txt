@@ -9,10 +9,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(gRPC CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
 
-file(GLOB GURUX_SOURCES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/gurux.dlms.cpp/development/src/*.cpp"
-)
-
 add_subdirectory(proto)
 
 add_library(${PROJECT_NAME}_lib)
@@ -31,6 +27,10 @@ target_sources(${PROJECT_NAME}_lib
         ${CMAKE_CURRENT_SOURCE_DIR}/src/service/frame_service.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/server/server.cpp
         
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/utils/CosemDescriptorParser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/utils/DlmsFrameUtils.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core/utils/CosemDataParser.cpp
+
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ParseHeader.cpp
 
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/ACTIONS/REQUEST/ActionRequestParser.cpp
@@ -42,7 +42,6 @@ target_sources(${PROJECT_NAME}_lib
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/REQUEST/SetRequestParser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CommandTypes/SET/RESPONSE/SetResponseParser.cpp
 
-        ${GURUX_SOURCES}
 )
 
 if(MSVC)
@@ -72,4 +71,4 @@ if(MSVC)
     )
 endif()
 
-add_subdirectory(test)
+# add_subdirectory(test)

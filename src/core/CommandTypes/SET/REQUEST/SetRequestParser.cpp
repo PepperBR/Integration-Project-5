@@ -1,38 +1,39 @@
 #include "core/CommandTypes/SET/REQUEST/SetRequestParser.h"
 #include "core/enums.h"
-#include <sstream>
+#include "core/utils/CosemDataParser.h"
+#include "core/utils/CosemDescriptorParser.h"
+#include "core/utils/DlmsFrameUtils.h"
+
 #include <string>
 #include <variant>
 
-auto SetRequestParser::buildHeader(const std::vector<uint8_t> &data, VerifyFrameResponse &response) -> bool
-{
-    auto serviceType = static_cast<ServiceType>(data[1]);
-    auto invokeInfo = ParseHeader::decodeInvokeField(data[2]);
-    auto headerResult = ParseHeader::parse_header(serviceType, invokeInfo.priority, invokeInfo.serviceClass);
+static constexpr size_t PAYLOAD_OFFSET = DlmsFrameUtils::APDU_PAYLOAD_OFFSET;
+static constexpr size_t DESCRIPTOR_SIZE = CosemDescriptorParser::DESCRIPTOR_SIZE;
+static constexpr size_t SELECTION_OFFSET = PAYLOAD_OFFSET + DESCRIPTOR_SIZE;
+static constexpr size_t DATA_OFFSET = SELECTION_OFFSET + 1;
+static constexpr size_t BLOCK_NUMBER_SIZE = DlmsFrameUtils::DATABLOCK_BLOCK_NUMBER_SIZE;
 
-    if (std::holds_alternative<ValidationError>(headerResult))
-    {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(headerResult));
-        return false;
-    }
-    response.fields.push_back(std::get<ParsedField>(headerResult));
-    return true;
+auto SetRequestParser::buildHeader(const std::vector<uint8_t> &data, FrameResponse &response) -> bool
+{
+    return DlmsFrameUtils::buildHeader(data, response);
 }
 
-auto SetRequestParser::verify(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto SetRequestParser::verify(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "set-request";
+    response.fields.name = "Set-Request";
+    response.fields.value_bytes =
+        DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, data.size() - DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET);
 
-    if (data.size() < 3)
+    constexpr size_t MIN_FRAME_SIZE = DlmsFrameUtils::APDU_PAYLOAD_OFFSET;
+    if (data.size() < MIN_FRAME_SIZE)
     {
-        response.valid = false;
-        response.errors.push_back({0, "Frame SET-REQUEST muito curto.", ""});
+        response.error.emplace(Error{"Frame SET-REQUEST muito curto."});
         return response;
     }
 
-    switch (data[1])
+    switch (data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])
     {
     case 0x01:
         return verifyNormal(data);
@@ -41,288 +42,155 @@ auto SetRequestParser::verify(const std::vector<uint8_t> &data) -> VerifyFrameRe
     case 0x03:
         return verifyWithDatablock(data);
     case 0x04:
-        return verifyWithList(data);
+        response.error.emplace(Error{"SET-REQUEST-WITH-LIST não implementado: " + std::to_string(data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])});
+        return response;
     case 0x05:
-        return verifyWithListAndFirstDatablock(data);
+        response.error.emplace(
+            Error{"SET-REQUEST-WITH-LIST-AND-FIRST-DATA-BLOCK não implementado: " + std::to_string(data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])});
+        return response;
     default:
-        response.valid = false;
-        response.errors.push_back({1, "Sub-tipo de SET-REQUEST desconhecido: " + std::to_string(data[1]), ""});
+        response.error.emplace(Error{"Sub-tipo de SET-REQUEST desconhecido: " + std::to_string(data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])});
         return response;
     }
 }
 
-auto SetRequestParser::parseCosemAttributeDescriptor(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>
+auto SetRequestParser::parseCosemAttributeDescriptor(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, Error>
 {
-    constexpr size_t descriptorSize = 9;
-    if (offset + descriptorSize > data.size())
-        return ValidationError{1, "Dados insuficientes para Cosem-Attribute-Descriptor.", ""};
-
-    uint16_t classId = (static_cast<uint16_t>(data[offset]) << 8) | data[offset + 1];
-
-    std::string obis = std::to_string(data[offset + 2]) + "." + std::to_string(data[offset + 3]) + "." + std::to_string(data[offset + 4]) + "." +
-                       std::to_string(data[offset + 5]) + "." + std::to_string(data[offset + 6]) + "." + std::to_string(data[offset + 7]);
-
-    int8_t attributeId = static_cast<int8_t>(data[offset + 8]);
-
-    return ParsedField{"Cosem-Attribute-Descriptor", static_cast<int>(offset), static_cast<int>(descriptorSize),
-                       "ClassId: " + std::to_string(classId) + ", OBIS: " + obis + ", AttributeId: " + std::to_string(attributeId),
-                       "Descritor de Atributo COSEM (ClassId, OBIS, AttributeId)"};
+    return CosemDescriptorParser::parseCosemAttributeDescriptor(data, offset);
 }
 
-auto SetRequestParser::parseDataBlockSA(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>
+auto SetRequestParser::parseDataBlockSA(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, Error>
 {
-    if (offset + 6 > data.size())
-        return ValidationError{1, "DataBlock-SA incompleto ou sem definicao de tamanho.", ""};
-
-    bool lastBlock = data[offset] != 0x00;
-
-    uint32_t blockNumber = (static_cast<uint32_t>(data[offset + 1]) << 24) | (static_cast<uint32_t>(data[offset + 2]) << 16) |
-                           (static_cast<uint32_t>(data[offset + 3]) << 8) | static_cast<uint32_t>(data[offset + 4]);
-
-    size_t lengthOffset = offset + 5;
-    uint8_t declaredBlockLen = data[lengthOffset];
-
-    size_t actualBlockLen = data.size() - (lengthOffset + 1);
-
-    if (actualBlockLen != declaredBlockLen)
-    {
-        return ValidationError{2,
-                               "Erro estrutural no DataBlock-SA: Tamanho declarado (" + std::to_string(declaredBlockLen) +
-                                   " bytes) difere dos bytes reais recebidos (" + std::to_string(actualBlockLen) + " bytes).",
-                               ""};
-    }
-
-    std::ostringstream oss;
-    oss << "LastBlock: " << (lastBlock ? "true" : "false") << ", BlockNumber: " << blockNumber << ", RawData: " << actualBlockLen << " bytes";
-
-    size_t totalBlockSize = data.size() - offset;
-    return ParsedField{"DataBlock-SA", static_cast<int>(offset), static_cast<int>(totalBlockSize), oss.str(),
-                       "Bloco de dados para SET/ACTION (last-block, block-number, raw-data)"};
+    return DlmsFrameUtils::parseDataBlockSA(data, offset);
 }
 
-auto SetRequestParser::verifyNormal(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto SetRequestParser::verifyNormal(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "set-request-normal";
+    response.fields.name = "Set-Request-Normal";
+    response.fields.value_bytes =
+        DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, data.size() - DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET);
 
     if (!buildHeader(data, response))
         return response;
 
-    if (data.size() < 13)
+    constexpr size_t minimumSize = DATA_OFFSET;
+    if (data.size() < minimumSize)
     {
-        response.valid = false;
-        response.errors.push_back({1, "SET-REQUEST-NORMAL incompleto.", ""});
+        response.error.emplace(Error{"SET-REQUEST-NORMAL incompleto."});
         return response;
     }
 
-    auto descResult = parseCosemAttributeDescriptor(data, 3);
-    if (std::holds_alternative<ValidationError>(descResult))
+    auto descResult = parseCosemAttributeDescriptor(data, PAYLOAD_OFFSET);
+    if (std::holds_alternative<Error>(descResult))
     {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(descResult));
+        response.error.emplace(std::get<Error>(descResult));
         return response;
     }
-    response.fields.push_back(std::get<ParsedField>(descResult));
+    response.fields.values.push_back(std::get<ParsedField>(descResult));
 
-    size_t dataOffset = 12;
-    uint8_t hasSelection = data[dataOffset];
-    if (hasSelection == 0x01)
-    {
-        response.fields.push_back({"Access-Selection", static_cast<int>(dataOffset), 1, "1", "Selective-Access-Descriptor presente"});
-        dataOffset++;
+    uint8_t hasSelection = data[SELECTION_OFFSET];
+    ParsedField selField;
+    selField.identifier = "access-selection";
+    selField.name = "Access-Selection";
+    selField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, SELECTION_OFFSET, 1);
+    response.fields.values.push_back(selField);
 
-        if (dataOffset >= data.size())
-        {
-            response.valid = false;
-            response.errors.push_back({1, "SET-REQUEST-NORMAL invalido: Selective-Access-Descriptor ausente.", ""});
-            return response;
-        }
-    }
-    else
+    if (hasSelection == 0x01 && DATA_OFFSET >= data.size())
     {
-        response.fields.push_back({"Access-Selection", static_cast<int>(dataOffset), 1, "0", "Sem seleção de acesso"});
-        dataOffset++;
-    }
-
-    if (dataOffset >= data.size())
-    {
-        response.valid = false;
-        response.errors.push_back({1, "SET-REQUEST-NORMAL invalido: Valor a ser escrito (Data value) ausente.", ""});
+        response.error.emplace(Error{"SET-REQUEST-NORMAL invalido: Selective-Access-Descriptor ausente."});
         return response;
     }
 
-    size_t valueLen = data.size() - dataOffset;
-    response.fields.push_back({"Data (value)", static_cast<int>(dataOffset), static_cast<int>(valueLen), std::to_string(valueLen) + " bytes",
-                               "Valor a ser escrito no atributo COSEM"});
+    if (DATA_OFFSET >= data.size())
+    {
+        response.error.emplace(Error{"SET-REQUEST-NORMAL invalido: Valor a ser escrito (Data value) ausente."});
+        return response;
+    }
+
+    size_t dataEnd = DATA_OFFSET;
+    auto dataResult = CosemDataParser::parse(data, dataEnd, dataEnd);
+    if (std::holds_alternative<Error>(dataResult))
+    {
+        response.error.emplace(std::get<Error>(dataResult));
+        return response;
+    }
+    ParsedField dataField;
+    dataField.identifier = "data";
+    dataField.name = "Data";
+    dataField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DATA_OFFSET, dataEnd - DATA_OFFSET);
+    dataField.values.push_back(std::get<ParsedField>(dataResult));
+    response.fields.values.push_back(dataField);
 
     return response;
 }
 
-auto SetRequestParser::verifyWithFirstDatablock(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto SetRequestParser::verifyWithFirstDatablock(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "set-request-with-first-datablock";
+    response.fields.name = "Set-Request-With-First-Datablock";
+    response.fields.value_bytes =
+        DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, data.size() - DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET);
 
     if (!buildHeader(data, response))
         return response;
 
-    if (data.size() < 19)
+    constexpr size_t minimumSize = DATA_OFFSET + DlmsFrameUtils::DATABLOCK_HEADER_SIZE;
+    if (data.size() < minimumSize)
     {
-        response.valid = false;
-        response.errors.push_back({1, "SET-REQUEST-WITH-FIRST-DATABLOCK incompleto.", ""});
+        response.error.emplace(Error{"SET-REQUEST-WITH-FIRST-DATABLOCK incompleto."});
         return response;
     }
 
-    auto descResult = parseCosemAttributeDescriptor(data, 3);
-    if (std::holds_alternative<ValidationError>(descResult))
+    auto descResult = parseCosemAttributeDescriptor(data, PAYLOAD_OFFSET);
+    if (std::holds_alternative<Error>(descResult))
     {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(descResult));
+        response.error.emplace(std::get<Error>(descResult));
         return response;
     }
-    response.fields.push_back(std::get<ParsedField>(descResult));
+    response.fields.values.push_back(std::get<ParsedField>(descResult));
 
-    size_t offset = 12;
-    uint8_t hasSelection = data[offset++];
-    response.fields.push_back({"Access-Selection", static_cast<int>(offset - 1), 1, std::to_string(hasSelection),
-                               hasSelection ? "Selective-Access-Descriptor presente" : "Sem seleção de acesso"});
+    uint8_t hasSelection = data[SELECTION_OFFSET];
+    ParsedField selField;
+    selField.identifier = "access-selection";
+    selField.name = "Access-Selection";
+    selField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, SELECTION_OFFSET, 1);
+    response.fields.values.push_back(selField);
 
-    auto blockResult = parseDataBlockSA(data, offset);
-    if (std::holds_alternative<ValidationError>(blockResult))
-    {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(blockResult));
-    }
+    auto blockResult = parseDataBlockSA(data, DATA_OFFSET);
+    if (std::holds_alternative<Error>(blockResult))
+        response.error.emplace(std::get<Error>(blockResult));
     else
-    {
-        response.fields.push_back(std::get<ParsedField>(blockResult));
-    }
+        response.fields.values.push_back(std::get<ParsedField>(blockResult));
 
     return response;
 }
 
-auto SetRequestParser::verifyWithDatablock(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto SetRequestParser::verifyWithDatablock(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "set-request-with-datablock";
+    response.fields.name = "Set-Request-With-Datablock";
+    response.fields.value_bytes =
+        DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, data.size() - DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET);
 
     if (!buildHeader(data, response))
         return response;
 
-    if (data.size() < 9)
+    constexpr size_t minimumSize = PAYLOAD_OFFSET + DlmsFrameUtils::DATABLOCK_HEADER_SIZE;
+    if (data.size() < minimumSize)
     {
-        response.valid = false;
-        response.errors.push_back({1, "SET-REQUEST-WITH-DATABLOCK incompleto.", ""});
+        response.error.emplace(Error{"SET-REQUEST-WITH-DATABLOCK incompleto."});
         return response;
     }
 
-    auto blockResult = parseDataBlockSA(data, 3);
-    if (std::holds_alternative<ValidationError>(blockResult))
-    {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(blockResult));
-    }
+    auto blockResult = parseDataBlockSA(data, PAYLOAD_OFFSET);
+    if (std::holds_alternative<Error>(blockResult))
+        response.error.emplace(std::get<Error>(blockResult));
     else
-    {
-        response.fields.push_back(std::get<ParsedField>(blockResult));
-    }
-
-    return response;
-}
-
-auto SetRequestParser::verifyWithList(const std::vector<uint8_t> &data) -> VerifyFrameResponse
-{
-    VerifyFrameResponse response;
-    response.valid = true;
-
-    if (!buildHeader(data, response))
-        return response;
-
-    if (data.size() < 4)
-    {
-        response.valid = false;
-        response.errors.push_back({1, "SET-REQUEST-WITH-LIST incompleto.", ""});
-        return response;
-    }
-
-    uint8_t count = data[3];
-    response.fields.push_back({"Attribute-Descriptor-List Count", 3, 1, std::to_string(count), "Número de descritores na lista"});
-
-    size_t offset = 4;
-    for (uint8_t i = 0; i < count; ++i)
-    {
-        auto descResult = parseCosemAttributeDescriptor(data, offset);
-        if (std::holds_alternative<ValidationError>(descResult))
-        {
-            response.valid = false;
-            response.errors.push_back(std::get<ValidationError>(descResult));
-            return response;
-        }
-        auto field = std::get<ParsedField>(descResult);
-        field.name = "Cosem-Attribute-Descriptor[" + std::to_string(i) + "]";
-        response.fields.push_back(field);
-
-        offset += 9;
-    }
-
-    if (offset >= data.size())
-    {
-        response.valid = false;
-        response.errors.push_back({1, "SET-REQUEST-WITH-LIST invalido: Lista de valores (Value-List) ausente.", ""});
-        return response;
-    }
-
-    size_t valLen = data.size() - offset;
-    response.fields.push_back({"Value-List", static_cast<int>(offset), static_cast<int>(valLen), std::to_string(valLen) + " bytes",
-                               "Lista de valores Data a serem escritos"});
-
-    return response;
-}
-
-auto SetRequestParser::verifyWithListAndFirstDatablock(const std::vector<uint8_t> &data) -> VerifyFrameResponse
-{
-    VerifyFrameResponse response;
-    response.valid = true;
-
-    if (!buildHeader(data, response))
-        return response;
-
-    if (data.size() < 4)
-    {
-        response.valid = false;
-        response.errors.push_back({1, "SET-REQUEST-WITH-LIST-AND-FIRST-DATABLOCK incompleto.", ""});
-        return response;
-    }
-
-    uint8_t count = data[3];
-    response.fields.push_back({"Attribute-Descriptor-List Count", 3, 1, std::to_string(count), "Número de descritores na lista"});
-
-    size_t offset = 4;
-    for (uint8_t i = 0; i < count; ++i)
-    {
-        auto descResult = parseCosemAttributeDescriptor(data, offset);
-        if (std::holds_alternative<ValidationError>(descResult))
-        {
-            response.valid = false;
-            response.errors.push_back(std::get<ValidationError>(descResult));
-            return response;
-        }
-        auto field = std::get<ParsedField>(descResult);
-        field.name = "Cosem-Attribute-Descriptor[" + std::to_string(i) + "]";
-        response.fields.push_back(field);
-        offset += 9;
-    }
-
-    auto blockResult = parseDataBlockSA(data, offset);
-    if (std::holds_alternative<ValidationError>(blockResult))
-    {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(blockResult));
-    }
-    else
-    {
-        response.fields.push_back(std::get<ParsedField>(blockResult));
-    }
+        response.fields.values.push_back(std::get<ParsedField>(blockResult));
 
     return response;
 }

@@ -1,55 +1,56 @@
 #include "core/CommandTypes/ACTIONS/RESPONSE/ActionResponseParser.h"
 #include "core/enums.h"
+#include "core/utils/CosemDataParser.h"
+#include "core/utils/DlmsFrameUtils.h"
+
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <variant>
 
-auto ActionResponseParser::buildHeader(const std::vector<uint8_t> &data, VerifyFrameResponse &response) -> bool
-{
-    auto serviceType = static_cast<ServiceType>(data[1]);
-    auto invokeInfo = ParseHeader::decodeInvokeField(data[2]);
-    auto headerResult = ParseHeader::parse_header(serviceType, invokeInfo.priority, invokeInfo.serviceClass);
+static constexpr size_t PAYLOAD_OFFSET = DlmsFrameUtils::APDU_PAYLOAD_OFFSET;
+static constexpr size_t RESULT_OFFSET = PAYLOAD_OFFSET;
+static constexpr size_t RETURN_PARAMS_OFFSET = PAYLOAD_OFFSET + 1;
+static constexpr size_t BLOCK_NUMBER_SIZE = DlmsFrameUtils::DATABLOCK_BLOCK_NUMBER_SIZE;
 
-    if (std::holds_alternative<ValidationError>(headerResult))
-    {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(headerResult));
-        return false;
-    }
-    response.fields.push_back(std::get<ParsedField>(headerResult));
-    return true;
+auto ActionResponseParser::buildHeader(const std::vector<uint8_t> &data, FrameResponse &response) -> bool
+{
+    return DlmsFrameUtils::buildHeader(data, response);
 }
 
-auto ActionResponseParser::verify(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto ActionResponseParser::verify(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "action-response";
+    response.fields.name = "Action-Response";
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
 
-    if (data.size() < 3)
+    constexpr size_t MIN_FRAME_SIZE = DlmsFrameUtils::APDU_PAYLOAD_OFFSET;
+    if (data.size() < MIN_FRAME_SIZE)
     {
-        response.valid = false;
-        response.errors.push_back({0, "Frame ACTION-RESPONSE muito curto.", ""});
+        response.error.emplace(Error{"Frame ACTION-RESPONSE muito curto."});
         return response;
     }
 
-    switch (data[1])
+    switch (data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])
     {
     case 0x01:
         return verifyNormal(data);
     case 0x02:
         return verifyWithPblock(data);
     case 0x03:
-        return verifyWithList(data);
+        response.error.emplace(
+            Error{"ACTION-RESPONSE-WITH-LIST não implementado: " + std::to_string(data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])});
+        return response;
     case 0x04:
         return verifyNextPblock(data);
     default:
-        response.valid = false;
-        response.errors.push_back({1, "Sub-tipo de ACTION-RESPONSE desconhecido: " + std::to_string(data[1]), ""});
+        response.error.emplace(Error{"Sub-tipo de ACTION-RESPONSE desconhecido: " + std::to_string(data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])});
         return response;
     }
 }
 
-auto ActionResponseParser::parseActionResult(uint8_t value, size_t offset) -> std::variant<ParsedField, ValidationError>
+auto ActionResponseParser::parseActionResult(uint8_t value, size_t /*offset*/) -> std::variant<ParsedField, Error>
 {
     struct Entry
     {
@@ -72,253 +73,187 @@ auto ActionResponseParser::parseActionResult(uint8_t value, size_t offset) -> st
         {250, "Other Reason"},
     };
 
+    std::ostringstream oss;
+    oss << std::setw(2) << std::setfill('0') << std::hex << std::uppercase << static_cast<int>(value);
+
     for (const auto &e : table)
     {
         if (e.code == value)
-            return ParsedField{"Action-Result", static_cast<int>(offset), 1, std::to_string(value), e.label};
+        {
+            ParsedField field;
+            field.identifier = "action-result";
+            field.name = "Action-Result";
+            field.value_bytes = oss.str();
+            field.values.push_back({e.label, ""});
+            return field;
+        }
     }
-    return ValidationError{2, "Action-Result desconhecido: " + std::to_string(value), ""};
+    return Error{"Action-Result desconhecido: " + std::to_string(value)};
 }
 
-auto ActionResponseParser::parseDataBlockSA(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, ValidationError>
+auto ActionResponseParser::parseDataBlockSA(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, Error>
 {
-    if (offset + 6 > data.size())
-        return ValidationError{1, "DataBlock-SA (pblock) incompleto ou sem definicao de tamanho.", ""};
-
-    bool lastBlock = data[offset] != 0x00;
-
-    uint32_t blockNumber = (static_cast<uint32_t>(data[offset + 1]) << 24) | (static_cast<uint32_t>(data[offset + 2]) << 16) |
-                           (static_cast<uint32_t>(data[offset + 3]) << 8) | static_cast<uint32_t>(data[offset + 4]);
-
-    size_t lengthOffset = offset + 5;
-    uint8_t declaredBlockLen = data[lengthOffset];
-    size_t actualBlockLen = data.size() - (lengthOffset + 1);
-
-    if (actualBlockLen != declaredBlockLen)
-    {
-        return ValidationError{2,
-                               "Erro estrutural no DataBlock-SA (pblock): Tamanho declarado (" + std::to_string(declaredBlockLen) +
-                                   " bytes) difere dos bytes reais recebidos (" + std::to_string(actualBlockLen) + " bytes).",
-                               ""};
-    }
-
-    std::ostringstream oss;
-    oss << "LastBlock: " << (lastBlock ? "true" : "false") << ", BlockNumber: " << blockNumber << ", RawData: " << actualBlockLen << " bytes";
-
-    size_t totalBlockSize = data.size() - offset;
-    return ParsedField{"DataBlock-SA (pblock)", static_cast<int>(offset), static_cast<int>(totalBlockSize), oss.str(),
-                       "Bloco de dados para ACTION (last-block, block-number, raw-data)"};
+    return DlmsFrameUtils::parseDataBlockSA(data, offset);
 }
 
-auto ActionResponseParser::verifyNormal(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto ActionResponseParser::verifyNormal(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "action-response-normal";
+    response.fields.name = "Action-Response-Normal";
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
 
     if (!buildHeader(data, response))
         return response;
 
-    if (data.size() < 4)
+    constexpr size_t minimumSize = RETURN_PARAMS_OFFSET;
+    if (data.size() < minimumSize)
     {
-        response.valid = false;
-        response.errors.push_back({1, "ACTION-RESPONSE-NORMAL incompleto.", ""});
+        response.error.emplace(Error{"ACTION-RESPONSE-NORMAL incompleto."});
         return response;
     }
 
-    auto resultField = parseActionResult(data[3], 3);
-    if (std::holds_alternative<ValidationError>(resultField))
+    auto resultField = parseActionResult(data[RESULT_OFFSET], RESULT_OFFSET);
+    if (std::holds_alternative<Error>(resultField))
     {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(resultField));
+        response.error.emplace(std::get<Error>(resultField));
         return response;
     }
-    response.fields.push_back(std::get<ParsedField>(resultField));
+    response.fields.values.push_back(std::get<ParsedField>(resultField));
 
-    size_t offset = 4;
+    size_t offset = RETURN_PARAMS_OFFSET;
     if (data.size() > offset)
     {
         uint8_t hasReturn = data[offset];
-        if (hasReturn == 0x00)
-        {
-            response.fields.push_back({"Return-Parameters", static_cast<int>(offset), 1, "0", "Sem parâmetros de retorno"});
-            offset++;
-        }
-        else if (hasReturn == 0x01)
-        {
-            response.fields.push_back({"Return-Parameters", static_cast<int>(offset), 1, "1", "Parâmetros de retorno presentes"});
-            offset++;
 
+        ParsedField returnParamField;
+        returnParamField.identifier = "return-parameters";
+        returnParamField.name = "Return-Parameters";
+        returnParamField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, 1);
+        response.fields.values.push_back(returnParamField);
+        offset++;
+
+        if (hasReturn == 0x01)
+        {
             if (offset >= data.size())
             {
-                response.valid = false;
-                response.errors.push_back({1, "ACTION-RESPONSE-NORMAL invalido: Get-Data-Result ausente.", ""});
+                response.error.emplace(Error{"ACTION-RESPONSE-NORMAL invalido: Get-Data-Result ausente."});
                 return response;
             }
 
             uint8_t choiceTag = data[offset];
             if (choiceTag == 0x00)
             {
-                size_t payloadLen = data.size() - (offset + 1);
-                response.fields.push_back({"Get-Data-Result (Data)", static_cast<int>(offset), static_cast<int>(payloadLen + 1),
-                                           std::to_string(payloadLen) + " bytes", "Dados de retorno da ação"});
-                offset = data.size();
+                size_t dataEnd = offset + 1;
+                auto dataResult = CosemDataParser::parse(data, dataEnd, dataEnd);
+                if (std::holds_alternative<Error>(dataResult))
+                {
+                    response.error.emplace(std::get<Error>(dataResult));
+                    return response;
+                }
+                ParsedField getDataResultField;
+                getDataResultField.identifier = "get-data-result";
+                getDataResultField.name = "Get-Data-Result";
+                getDataResultField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, 1);
+                getDataResultField.values.push_back(std::get<ParsedField>(dataResult));
+                response.fields.values.push_back(getDataResultField);
+                offset = dataEnd;
             }
             else if (choiceTag == 0x01)
             {
-                if (offset + 1 >= data.size())
+                constexpr size_t choiceTagSize = 1;
+                if (offset + choiceTagSize >= data.size())
                 {
-                    response.valid = false;
-                    response.errors.push_back({1, "ACTION-RESPONSE-NORMAL invalido: Data-Access-Result do choice ausente.", ""});
+                    response.error.emplace(Error{"ACTION-RESPONSE-NORMAL invalido: Data-Access-Result do choice ausente."});
                     return response;
                 }
 
-                auto dar = parseActionResult(data[offset + 1], offset + 1);
-                if (std::holds_alternative<ValidationError>(dar))
+                size_t darOffset = offset + choiceTagSize;
+                auto dar = parseActionResult(data[darOffset], darOffset);
+                if (std::holds_alternative<Error>(dar))
                 {
-                    response.valid = false;
-                    response.errors.push_back(std::get<ValidationError>(dar));
+                    response.error.emplace(std::get<Error>(dar));
                     return response;
                 }
 
+                constexpr size_t choiceFieldSize = choiceTagSize + 1;
                 auto f = std::get<ParsedField>(dar);
-                f.name = "Get-Data-Result (Data-Access-Result)";
-                response.fields.push_back(f);
-                offset += 2;
+                f.identifier = "get-data-result";
+                f.name = "Get-Data-Result";
+                f.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, choiceFieldSize);
+                response.fields.values.push_back(f);
+                offset += choiceFieldSize;
             }
             else
             {
-                response.valid = false;
-                response.errors.push_back({3, "Tag de escolha de Get-Data-Result invalida: " + std::to_string(choiceTag), ""});
+                response.error.emplace(Error{"Tag de escolha de Get-Data-Result invalida: " + std::to_string(choiceTag)});
                 return response;
             }
         }
-        else
+        else if (hasReturn != 0x00)
         {
-            response.valid = false;
-            response.errors.push_back({3, "Indicador de Return-Parameters inválido: " + std::to_string(hasReturn), ""});
+            response.error.emplace(Error{"Indicador de Return-Parameters inválido: " + std::to_string(hasReturn)});
             return response;
         }
     }
 
     if (offset < data.size())
-    {
-        response.valid = false;
-        response.errors.push_back({2, "Erro estrutural: Bytes extras detectados ao final do frame ACTION-RESPONSE-NORMAL.", ""});
-    }
+        response.error.emplace(Error{"Erro estrutural: Bytes extras detectados ao final do frame ACTION-RESPONSE-NORMAL."});
 
     return response;
 }
 
-auto ActionResponseParser::verifyWithPblock(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto ActionResponseParser::verifyWithPblock(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "action-response-with-pblock";
+    response.fields.name = "Action-Response-With-Pblock";
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
 
     if (!buildHeader(data, response))
         return response;
 
-    if (data.size() < 9)
+    constexpr size_t minimumSize = PAYLOAD_OFFSET + DlmsFrameUtils::DATABLOCK_HEADER_SIZE;
+    if (data.size() < minimumSize)
     {
-        response.valid = false;
-        response.errors.push_back({1, "ACTION-RESPONSE-WITH-PBLOCK incompleto.", ""});
+        response.error.emplace(Error{"ACTION-RESPONSE-WITH-PBLOCK incompleto."});
         return response;
     }
 
-    auto blockResult = parseDataBlockSA(data, 3);
-    if (std::holds_alternative<ValidationError>(blockResult))
-    {
-        response.valid = false;
-        response.errors.push_back(std::get<ValidationError>(blockResult));
-    }
+    auto blockResult = parseDataBlockSA(data, PAYLOAD_OFFSET);
+    if (std::holds_alternative<Error>(blockResult))
+        response.error.emplace(std::get<Error>(blockResult));
     else
-    {
-        response.fields.push_back(std::get<ParsedField>(blockResult));
-    }
+        response.fields.values.push_back(std::get<ParsedField>(blockResult));
 
     return response;
 }
 
-auto ActionResponseParser::verifyWithList(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto ActionResponseParser::verifyNextPblock(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    VerifyFrameResponse response;
-    response.valid = true;
+    FrameResponse response;
+    response.fields.identifier = "action-response-next-pblock";
+    response.fields.name = "Action-Response-Next-Pblock";
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
 
     if (!buildHeader(data, response))
         return response;
 
-    if (data.size() < 4)
+    constexpr size_t minimumSize = PAYLOAD_OFFSET + BLOCK_NUMBER_SIZE;
+    if (data.size() < minimumSize)
     {
-        response.valid = false;
-        response.errors.push_back({1, "ACTION-RESPONSE-WITH-LIST incompleto.", ""});
+        response.error.emplace(Error{"ACTION-RESPONSE-NEXT-PBLOCK incompleto."});
         return response;
     }
 
-    uint8_t count = data[3];
-    response.fields.push_back({"Response-List Count", 3, 1, std::to_string(count), "Número de respostas na lista"});
+    ParsedField bnField;
+    bnField.identifier = "block-number";
+    bnField.name = "Block-Number";
+    bnField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, PAYLOAD_OFFSET, BLOCK_NUMBER_SIZE);
+    response.fields.values.push_back(bnField);
 
-    size_t offset = 4;
-    for (uint8_t i = 0; i < count; ++i)
-    {
-        if (offset >= data.size())
-        {
-            response.valid = false;
-            response.errors.push_back({1, "Lista de respostas truncada no índice " + std::to_string(i), ""});
-            return response;
-        }
-
-        auto resultField = parseActionResult(data[offset], offset);
-        if (std::holds_alternative<ValidationError>(resultField))
-        {
-            response.valid = false;
-            response.errors.push_back(std::get<ValidationError>(resultField));
-            return response;
-        }
-        auto f = std::get<ParsedField>(resultField);
-        f.name = "Action-Result[" + std::to_string(i) + "]";
-        response.fields.push_back(f);
-        offset++;
-
-        if (offset >= data.size())
-        {
-            response.valid = false;
-            response.errors.push_back({1, "Indicador Return-Parameters ausente na lista no índice " + std::to_string(i), ""});
-            return response;
-        }
-
-        uint8_t hasReturn = data[offset++];
-        ParsedField rf{"Return-Parameters[" + std::to_string(i) + "]", static_cast<int>(offset - 1), 1, std::to_string(hasReturn),
-                       hasReturn ? "Parâmetros de retorno presentes" : "Sem parâmetros de retorno"};
-        response.fields.push_back(rf);
-    }
-
-    return response;
-}
-
-auto ActionResponseParser::verifyNextPblock(const std::vector<uint8_t> &data) -> VerifyFrameResponse
-{
-    VerifyFrameResponse response;
-    response.valid = true;
-
-    if (!buildHeader(data, response))
-        return response;
-
-    if (data.size() < 7)
-    {
-        response.valid = false;
-        response.errors.push_back({1, "ACTION-RESPONSE-NEXT-PBLOCK incompleto.", ""});
-        return response;
-    }
-
-    uint32_t blockNumber = (static_cast<uint32_t>(data[3]) << 24) | (static_cast<uint32_t>(data[4]) << 16) | (static_cast<uint32_t>(data[5]) << 8) |
-                           static_cast<uint32_t>(data[6]);
-
-    response.fields.push_back({"Block-Number", 3, 4, std::to_string(blockNumber), "Número do próximo pblock solicitado pelo servidor"});
-
-    if (data.size() > 7)
-    {
-        response.valid = false;
-        response.errors.push_back({2, "Erro estrutural: Bytes extras detectados ao final do frame ACTION-RESPONSE-NEXT-PBLOCK.", ""});
-    }
+    if (data.size() > minimumSize)
+        response.error.emplace(Error{"Erro estrutural: Bytes extras detectados ao final do frame ACTION-RESPONSE-NEXT-PBLOCK."});
 
     return response;
 }

@@ -5,111 +5,72 @@
 #include "core/CommandTypes/GET/RESPONSE/GetResponseParser.h"
 #include "core/CommandTypes/SET/REQUEST/SetRequestParser.h"
 #include "core/CommandTypes/SET/RESPONSE/SetResponseParser.h"
-#include <iomanip>
-#include <list>
-#include <sstream>
+#include "core/CommonVerifierTypes.h"
+#include "core/utils/DlmsFrameUtils.h"
 
-auto XDlms::decode(const std::vector<uint8_t> &data) -> VerifyFrameResponse
+auto XDlms::decode(const std::vector<uint8_t> &data) -> FrameResponse
 {
-    if (data.size() < 4)
+    constexpr size_t MIN_APDU_SIZE = DlmsFrameUtils::APDU_PAYLOAD_OFFSET + 1;
+
+    if (data.size() < MIN_APDU_SIZE)
     {
-        VerifyFrameResponse response;
-        response.valid = false;
-        ValidationError err;
-
-        err.offset = 0;
+        FrameResponse response;
+        Error err;
         err.message = "Frame muito curto para ser uma APDU DLMS válida.";
-        err.found = to_hex_string((unsigned char *)data.data(), static_cast<int>(data.size()));
-        response.errors.push_back(err);
-
+        response.error.emplace(err);
         return response;
     }
 
-    auto commandType = identifier_x_dlms_data_type(data[0]);
+    constexpr size_t TAG_OFFSET = DlmsFrameUtils::APDU_TAG_OFFSET;
+    auto commandType = static_cast<XDlmsApduTag>(data[TAG_OFFSET]);
 
-    return verify_command(commandType, data);
-};
+    constexpr int parserOffset = static_cast<int>(DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET);
 
-auto XDlms::verify_command(XDlmsDataType commandType, const std::vector<uint8_t> &data) -> VerifyFrameResponse
+    auto inner = verify_command(commandType, data, parserOffset);
+
+    FrameResponse response;
+    response.fields.identifier = "XDLMS-APDU::CHOICE";
+    response.fields.name = "XDLMS-APDU";
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_TAG_OFFSET, 1);
+
+    if (inner.error.has_value())
+    {
+        response.error = inner.error;
+        return response;
+    }
+
+    inner.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
+    response.fields.values.push_back(std::move(inner.fields));
+    return response;
+}
+
+auto XDlms::verify_command(XDlmsApduTag commandType, const std::vector<uint8_t> &data, const int offset) -> FrameResponse
 {
     switch (commandType)
     {
-    case XDlmsDataType::GET_REQUEST:
-        return GetRequestParser::verify(data);
-    case XDlmsDataType::GET_RESPONSE:
+    case XDlmsApduTag::GET_REQUEST:
+        return GetRequestParser::verify(data, offset);
+    case XDlmsApduTag::GET_RESPONSE:
         return GetResponseParser::verify(data);
-    case XDlmsDataType::SET_REQUEST:
+    case XDlmsApduTag::SET_REQUEST:
         return SetRequestParser::verify(data);
-    case XDlmsDataType::SET_RESPONSE:
+    case XDlmsApduTag::SET_RESPONSE:
         return SetResponseParser::verify(data);
-    case XDlmsDataType::ACTION_REQUEST:
+    case XDlmsApduTag::ACTION_REQUEST:
         return ActionRequestParser::verify(data);
-    case XDlmsDataType::ACTION_RESPONSE:
+    case XDlmsApduTag::ACTION_RESPONSE:
         return ActionResponseParser::verify(data);
     default:
-        VerifyFrameResponse response;
-        response.valid = false;
-        ValidationError err;
-
-        err.offset = 0;
+        FrameResponse response;
+        Error err;
         err.message = "Tipo de Comando desconhecido ou não suportado.";
-        err.found = to_hex_string((unsigned char *)data.data(), 3);
-        response.errors.push_back(err);
-
+        response.error.emplace(err);
         return response;
     }
 }
 
 auto XDlms::to_hex_string(const unsigned char *bytes, int length) -> std::string
 {
-    std::ostringstream oss;
-    for (int i = 0; i < length; ++i)
-    {
-        oss << std::setw(2) << std::setfill('0') << std::hex << std::uppercase << (int)bytes[i] << " ";
-    }
-    std::string res = oss.str();
-    if (!res.empty())
-    {
-        res.pop_back();
-    }
-    return res;
-};
-
-auto XDlms::identifier_x_dlms_data_type(uint8_t data) -> XDlmsDataType
-{
-    auto tag = static_cast<XDlmsApduTag>(data);
-
-    switch (tag)
-    {
-    case XDlmsApduTag::GET_REQUEST:
-        return XDlmsDataType::GET_REQUEST;
-    case XDlmsApduTag::GET_RESPONSE:
-        return XDlmsDataType::GET_RESPONSE;
-    case XDlmsApduTag::SET_REQUEST:
-        return XDlmsDataType::SET_REQUEST;
-    case XDlmsApduTag::SET_RESPONSE:
-        return XDlmsDataType::SET_RESPONSE;
-    case XDlmsApduTag::ACTION_REQUEST:
-        return XDlmsDataType::ACTION_REQUEST;
-    case XDlmsApduTag::ACTION_RESPONSE:
-        return XDlmsDataType::ACTION_RESPONSE;
-    case XDlmsApduTag::EXCEPTION_RESPONSE:
-        return XDlmsDataType::EXCEPTION_RESPONSE;
-    case XDlmsApduTag::ACCESS_REQUEST:
-        return XDlmsDataType::ACCESS_REQUEST;
-    case XDlmsApduTag::ACCESS_RESPONSE:
-        return XDlmsDataType::ACCESS_RESPONSE;
-    case XDlmsApduTag::EVENT_NOTIFICATION_REQUEST:
-        return XDlmsDataType::EVENT_NOTIFICATION_REQUEST;
-    case XDlmsApduTag::DATA_NOTIFICATION:
-        return XDlmsDataType::DATA_NOTIFICATION;
-    case XDlmsApduTag::GENERAL_BLOCK_TRANSFER:
-        return XDlmsDataType::GENERAL_BLOCK_TRANSFER;
-    case XDlmsApduTag::GENERAL_CIPHERING:
-        return XDlmsDataType::GENERAL_CIPHERING;
-    case XDlmsApduTag::GENERAL_SIGNING:
-        return XDlmsDataType::GENERAL_SIGNING;
-    default:
-        return XDlmsDataType::UNKNOWN;
-    }
-};
+    std::vector<uint8_t> tmp(bytes, bytes + length);
+    return DlmsFrameUtils::bytes_to_hex(tmp, 0, static_cast<size_t>(length));
+}

@@ -16,7 +16,7 @@ auto GetRequestParser::buildHeader(const std::vector<uint8_t> &data, FrameRespon
     return DlmsFrameUtils::buildHeader(data, response);
 }
 
-auto GetRequestParser::verify(const std::vector<uint8_t> &data, int offset) -> FrameResponse
+auto GetRequestParser::verify(const std::vector<uint8_t> &data) -> FrameResponse
 {
     FrameResponse response;
     response.fields.identifier = "get-request";
@@ -33,7 +33,7 @@ auto GetRequestParser::verify(const std::vector<uint8_t> &data, int offset) -> F
     switch (data[DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET])
     {
     case 0x01:
-        return verifyNormal(data, offset);
+        return verifyNormal(data);
     case 0x02:
         return verifyNext(data);
     case 0x03:
@@ -45,7 +45,7 @@ auto GetRequestParser::verify(const std::vector<uint8_t> &data, int offset) -> F
     }
 }
 
-auto GetRequestParser::verifyNormal(const std::vector<uint8_t> &data, int offset) -> FrameResponse
+auto GetRequestParser::verifyNormal(const std::vector<uint8_t> &data) -> FrameResponse
 {
     FrameResponse response;
     response.fields.identifier = "get-request-normal";

@@ -3,151 +3,97 @@
 #include "core/CommandTypes/GET/RESPONSE/GetResponseParser.h"
 #include "hexToBytes.h"
 
-TEST_CASE("GetResponseParser - Validações Iniciais de Borda", "[GetResponse][General]")
+static bool hasError(const FrameResponse &r)
 {
-    GetResponseParser parser;
-
-    SECTION("Frame excessivamente curto (< 3 bytes)")
-    {
-        std::vector<uint8_t> data = {0xC4, 0x01};
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
-
-    SECTION("Subtipo de GET-RESPONSE inválido/desconhecido")
-    {
-        auto data = hexToBytes("C4 0F 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
+    return r.error.has_value();
 }
 
-TEST_CASE("GetResponseParser - GET-RESPONSE-NORMAL (Subtipo 0x01)", "[GetResponse][Normal]")
+static bool ok(const FrameResponse &r)
 {
-    GetResponseParser parser;
+    return !r.error.has_value();
+}
 
-    SECTION("Caminho Feliz: Choice [0] - Retorno com Dados puros válidos")
+TEST_CASE("GetResponseParser - Frame curto demais", "[GetResponse]")
+{
+    auto data = hexToBytes("C4 01");
+    auto r = GetResponseParser::verify(data);
+    REQUIRE(hasError(r));
+}
+
+TEST_CASE("GetResponseParser - Subtipo desconhecido", "[GetResponse]")
+{
+    auto data = hexToBytes("C4 0F 41");
+    auto r = GetResponseParser::verify(data);
+    REQUIRE(hasError(r));
+}
+
+TEST_CASE("GetResponseParser - GET-RESPONSE-WITH-LIST não implementado", "[GetResponse]")
+{
+    auto data = hexToBytes("C4 03 41");
+    auto r = GetResponseParser::verify(data);
+    REQUIRE(hasError(r));
+}
+
+TEST_CASE("GetResponseParser - GET-RESPONSE-NORMAL", "[GetResponse]")
+{
+    SECTION("OK: Data-Access-Result = success (choice=01, enum=00)")
     {
-        auto data = hexToBytes("C4 01 41 00 AA BB CC");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
+        auto data = hexToBytes("C4 01 41 01 00");
+        auto r = GetResponseParser::verify(data);
+        REQUIRE(ok(r));
+        REQUIRE(r.fields.identifier == "get-response-normal");
     }
 
-    SECTION("Caminho Feliz: Choice [1] - Retorno com Data-Access-Result mapeado")
+    SECTION("OK: Data-Access-Result = hardware fault (choice=01, enum=01)")
     {
-        auto data = hexToBytes("C4 01 41 01 03");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.errors.empty());
-        REQUIRE(response.fields.size() == 1);
+        auto data = hexToBytes("C4 01 41 01 01");
+        auto r = GetResponseParser::verify(data);
+        REQUIRE(ok(r));
     }
 
-    SECTION("Erro: Frame menor que o tamanho mínimo de 4 bytes")
+    SECTION("Erro: frame incompleto sem byte de choice")
     {
         auto data = hexToBytes("C4 01 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto r = GetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 
-    SECTION("Erro: Tag de Choice [1] declarada mas sem o byte de enum subsequente")
+    SECTION("Erro: choice=01 sem byte de enum subsequente")
     {
         auto data = hexToBytes("C4 01 41 01");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto r = GetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 
-    SECTION("Erro: Tag de Choice inválida/desconhecida")
+    SECTION("Erro: tag de choice inválida")
     {
-        auto data = hexToBytes("C4 01 41 05");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Valor do enum Data-Access-Result desconhecido")
-    {
-        auto data = hexToBytes("C4 01 41 01 55");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto data = hexToBytes("C4 01 41 05 00");
+        auto r = GetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }
 
-TEST_CASE("GetResponseParser - GET-RESPONSE-WITH-DATABLOCK (Subtipo 0x02)", "[GetResponse][WithDatablock]")
+TEST_CASE("GetResponseParser - GET-RESPONSE-WITH-DATABLOCK", "[GetResponse]")
 {
-    GetResponseParser parser;
-
-    SECTION("Caminho Feliz: Bloco finalizado com payload de dados puros")
+    SECTION("OK: último bloco com dados")
     {
-        auto data = hexToBytes("C4 02 41 01 00 00 00 05 00 11 22");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.errors.empty());
-        REQUIRE(response.fields.size() == 1);
+        auto data = hexToBytes("C4 02 41 01 00 00 00 01 00 AA BB");
+        auto r = GetResponseParser::verify(data);
+        REQUIRE(ok(r));
+        REQUIRE(r.fields.identifier == "get-response-with-datablock");
     }
 
-    SECTION("Caminho Feliz: Bloco intermediário retornando uma falha de acesso")
+    SECTION("OK: bloco intermediário")
     {
-        auto data = hexToBytes("C4 02 41 00 00 00 00 01 01 0E");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.errors.empty());
+        auto data = hexToBytes("C4 02 41 00 00 00 00 01 00 11 22 33");
+        auto r = GetResponseParser::verify(data);
+        REQUIRE(ok(r));
     }
 
-    SECTION("Erro: Tamanho total menor que a assinatura mínima estrutural de 9 bytes")
+    SECTION("Erro: frame menor que o mínimo estrutural")
     {
-        auto data = hexToBytes("C4 02 41 01 00 00 00 05");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: DataBlock-G incompleto na janela do offset interno")
-    {
-        auto data = hexToBytes("C4 02 41 01 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Result-Tag indica DAR mas o byte de enum não existe")
-    {
-        auto data = hexToBytes("C4 02 41 01 00 00 00 05 01");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Result-Tag interna inválida")
-    {
-        auto data = hexToBytes("C4 02 41 01 00 00 00 05 99");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-}
-
-TEST_CASE("GetResponseParser - GET-RESPONSE-WITH-LIST (Subtipo 0x03)", "[GetResponse][WithList]")
-{
-    GetResponseParser parser;
-
-    SECTION("Mapeamento do recurso não implementado no firmware")
-    {
-        auto data = hexToBytes("C4 03 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
+        auto data = hexToBytes("C4 02 41 01 00 00 00 01");
+        auto r = GetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }

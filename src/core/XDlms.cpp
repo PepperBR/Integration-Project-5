@@ -1,10 +1,13 @@
 #include "core/XDlms.h"
 #include "core/CommandTypes/ACTIONS/REQUEST/ActionRequestParser.h"
 #include "core/CommandTypes/ACTIONS/RESPONSE/ActionResponseParser.h"
+
 #include "core/CommandTypes/GET/REQUEST/GetRequestParser.h"
 #include "core/CommandTypes/GET/RESPONSE/GetResponseParser.h"
+
 #include "core/CommandTypes/SET/REQUEST/SetRequestParser.h"
 #include "core/CommandTypes/SET/RESPONSE/SetResponseParser.h"
+
 #include "core/CommonVerifierTypes.h"
 #include "core/utils/DlmsFrameUtils.h"
 
@@ -26,7 +29,7 @@ auto XDlms::decode(const std::vector<uint8_t> &data) -> FrameResponse
 
     constexpr int parserOffset = static_cast<int>(DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET);
 
-    auto inner = verify_command(commandType, data, parserOffset);
+    auto inner = verify_command(commandType, data);
 
     FrameResponse response;
     response.fields.identifier = "XDLMS-APDU::CHOICE";
@@ -44,12 +47,12 @@ auto XDlms::decode(const std::vector<uint8_t> &data) -> FrameResponse
     return response;
 }
 
-auto XDlms::verify_command(XDlmsApduTag commandType, const std::vector<uint8_t> &data, const int offset) -> FrameResponse
+auto XDlms::verify_command(XDlmsApduTag commandType, const std::vector<uint8_t> &data) -> FrameResponse
 {
     switch (commandType)
     {
     case XDlmsApduTag::GET_REQUEST:
-        return GetRequestParser::verify(data, offset);
+        return GetRequestParser::verify(data);
     case XDlmsApduTag::GET_RESPONSE:
         return GetResponseParser::verify(data);
     case XDlmsApduTag::SET_REQUEST:

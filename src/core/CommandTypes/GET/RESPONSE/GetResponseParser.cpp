@@ -23,7 +23,7 @@ auto GetResponseParser::verify(const std::vector<uint8_t> &data) -> FrameRespons
     FrameResponse response;
     response.fields.identifier = "get-response";
     response.fields.name = "Get-Response";
-    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
+    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, 0, data.size());
 
     constexpr size_t MIN_FRAME_SIZE = DlmsFrameUtils::APDU_PAYLOAD_OFFSET;
     if (data.size() < MIN_FRAME_SIZE)
@@ -52,7 +52,8 @@ auto GetResponseParser::verifyNormal(const std::vector<uint8_t> &data) -> FrameR
     FrameResponse response;
     response.fields.identifier = "get-response-normal";
     response.fields.name = "Get-Response-Normal";
-    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
+    response.fields.value_bytes =
+        DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, data.size() - DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET);
 
     if (!buildHeader(data, response))
         return response;
@@ -80,12 +81,12 @@ auto GetResponseParser::verifyWithDatablock(const std::vector<uint8_t> &data) ->
     FrameResponse response;
     response.fields.identifier = "get-response-with-datablock";
     response.fields.name = "Get-Response-With-Datablock";
-    response.fields.value_bytes = DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, 1);
+    response.fields.value_bytes =
+        DlmsFrameUtils::bytes_to_hex(data, DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET, data.size() - DlmsFrameUtils::APDU_SERVICE_TYPE_OFFSET);
 
     if (!buildHeader(data, response))
         return response;
 
-    // Mínimo: header(3) + datablock_g_header(6) = 9
     constexpr size_t minimumSize = PAYLOAD_OFFSET + DATABLOCK_G_HEADER_SIZE;
     if (data.size() < minimumSize)
     {
@@ -147,20 +148,19 @@ auto GetResponseParser::parseGetDataResult(const std::vector<uint8_t> &data, siz
     if (offset >= data.size())
         return Error{"Get-Data-Result ausente."};
 
-    constexpr uint8_t CHOICE_DATA    = 0x00;
-    constexpr uint8_t CHOICE_ERROR   = 0x01;
-    constexpr size_t  CHOICE_TAG_SIZE = 1;
-    constexpr size_t  DAR_SIZE        = 1;
+    constexpr uint8_t CHOICE_DATA = 0x00;
+    constexpr uint8_t CHOICE_ERROR = 0x01;
+    constexpr size_t CHOICE_TAG_SIZE = 1;
+    constexpr size_t DAR_SIZE = 1;
 
     uint8_t choiceTag = data[offset];
 
     ParsedField field;
     field.identifier = "result";
-    field.name       = "Get-Data-Result";
+    field.name = "Get-Data-Result";
 
     if (choiceTag == CHOICE_DATA)
     {
-        // Decodifica a estrutura COSEM Data de forma recursiva e hierárquica
         size_t dataEnd = offset + CHOICE_TAG_SIZE;
         auto dataResult = CosemDataParser::parse(data, dataEnd, dataEnd);
 
@@ -168,7 +168,7 @@ auto GetResponseParser::parseGetDataResult(const std::vector<uint8_t> &data, siz
             return std::get<Error>(dataResult);
 
         auto dataField = std::get<ParsedField>(dataResult);
-        field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, CHOICE_TAG_SIZE); // choice tag (0x00 = Data)
+        field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, dataEnd - offset);
         field.values.push_back(std::move(dataField));
         return field;
     }
@@ -183,7 +183,7 @@ auto GetResponseParser::parseGetDataResult(const std::vector<uint8_t> &data, siz
             return darResult;
 
         auto darField = std::get<ParsedField>(darResult);
-        field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, CHOICE_TAG_SIZE); // choice tag (0x01 = Error)
+        field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, CHOICE_TAG_SIZE + DAR_SIZE);
         field.values.push_back(std::move(darField));
         return field;
     }
@@ -228,7 +228,7 @@ auto GetResponseParser::parseDataBlockG(const std::vector<uint8_t> &data, size_t
     if (resultTag == RESULT_DATA)
     {
         size_t rawLen = data.size() - rawDataAbs;
-        resultField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, resultTagAbs, RESULT_TAG_SIZE); // result tag
+        resultField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, resultTagAbs, RESULT_TAG_SIZE + rawLen);
     }
     else if (resultTag == RESULT_ERROR)
     {
@@ -238,7 +238,7 @@ auto GetResponseParser::parseDataBlockG(const std::vector<uint8_t> &data, size_t
         if (std::holds_alternative<Error>(dar))
             return dar;
         auto darField = std::get<ParsedField>(dar);
-        resultField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, resultTagAbs, RESULT_TAG_SIZE); // result tag
+        resultField.value_bytes = DlmsFrameUtils::bytes_to_hex(data, resultTagAbs, RESULT_TAG_SIZE + 1);
         resultField.values.push_back(std::move(darField));
     }
     else
@@ -249,7 +249,7 @@ auto GetResponseParser::parseDataBlockG(const std::vector<uint8_t> &data, size_t
     ParsedField field;
     field.identifier = "datablock-g";
     field.name = "DataBlock-G";
-    field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, LAST_BLOCK_SIZE + BLOCK_NUMBER_SIZE + RESULT_TAG_SIZE); // last-block+block-num+result-tag
+    field.value_bytes = DlmsFrameUtils::bytes_to_hex(data, offset, data.size() - offset);
     field.values.push_back(std::move(lastBlockField));
     field.values.push_back(std::move(blockNumberField));
     field.values.push_back(std::move(resultField));

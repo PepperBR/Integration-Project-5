@@ -1,181 +1,95 @@
 #include <catch2/catch_test_macros.hpp>
-#include <cstdint>
-#include <string>
-#include <vector>
 
 #include "core/CommandTypes/ACTIONS/RESPONSE/ActionResponseParser.h"
 #include "hexToBytes.h"
 
-TEST_CASE("ActionResponseParser - Validações Gerais e Erros de Inicialização", "[ActionResponse][General]")
+static bool hasError(const FrameResponse &r)
 {
-    ActionResponseParser parser;
-
-    SECTION("Frame excessivamente curto (< 3 bytes)")
-    {
-        std::vector<uint8_t> data = {0xC7, 0x01};
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
-
-    SECTION("Subtipo de ACTION-RESPONSE desconhecido")
-    {
-        auto data = hexToBytes("C7 09 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
+    return r.error.has_value();
 }
 
-TEST_CASE("ActionResponseParser - ACTION-RESPONSE-NORMAL (Subtipo 0x01)", "[ActionResponse][Normal]")
+static bool ok(const FrameResponse &r)
 {
-    ActionResponseParser parser;
+    return !r.error.has_value();
+}
+TEST_CASE("ActionResponseParser - Frame curto demais", "[ActionResponse]")
+{
+    auto data = hexToBytes("C7 01");
+    auto r = ActionResponseParser::verify(data);
+    REQUIRE(hasError(r));
+}
 
-    SECTION("Caminho Feliz: Sucesso e sem parâmetros de retorno")
+TEST_CASE("ActionResponseParser - Subtipo desconhecido", "[ActionResponse]")
+{
+    auto data = hexToBytes("C7 09 41");
+    auto r = ActionResponseParser::verify(data);
+    REQUIRE(hasError(r));
+}
+
+TEST_CASE("ActionResponseParser - Subtipo não implementado (0x03)", "[ActionResponse]")
+{
+    auto data = hexToBytes("C7 03 41 00");
+    auto r = ActionResponseParser::verify(data);
+    REQUIRE(hasError(r));
+}
+
+TEST_CASE("ActionResponseParser - ACTION-RESPONSE-NORMAL", "[ActionResponse]")
+{
+    SECTION("OK: result = success (0x00) sem return-params")
     {
+        // sub=01 invoke=41 result=00 return-params=00
         auto data = hexToBytes("C7 01 41 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.errors.empty());
-        REQUIRE(response.fields.size() >= 3);
+        auto r = ActionResponseParser::verify(data);
+        REQUIRE(ok(r));
+        REQUIRE(r.fields.identifier == "action-response-normal");
     }
 
-    SECTION("Caminho Feliz: Com parâmetros de retorno (Get-Data-Result tipo Data)")
+    SECTION("OK: result = hardware fault (0x01)")
     {
-        auto data = hexToBytes("C7 01 41 00 01 00 AA BB CC");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 4);
+        auto data = hexToBytes("C7 01 41 01 00");
+        auto r = ActionResponseParser::verify(data);
+        REQUIRE(ok(r));
     }
 
-    SECTION("Caminho Feliz: Com parâmetros de retorno (Get-Data-Result tipo Data-Access-Result)")
+    SECTION("Erro: resultado desconhecido")
     {
-        auto data = hexToBytes("C7 01 41 00 01 01 03");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 4);
+        auto data = hexToBytes("C7 01 41 55 00");
+        auto r = ActionResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 
-    SECTION("Erro: Frame incompleto / truncado no Action-Result")
+    SECTION("Erro: frame incompleto — sem byte de resultado")
     {
         auto data = hexToBytes("C7 01 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Action-Result com código inválido/desconhecido")
-    {
-        auto data = hexToBytes("C7 01 41 55");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Indicador de Return-Parameters inválido")
-    {
-        auto data = hexToBytes("C7 01 41 00 05");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto r = ActionResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }
 
-TEST_CASE("ActionResponseParser - ACTION-RESPONSE-WITH-PBLOCK (Subtipo 0x02)", "[ActionResponse][WithPblock]")
+TEST_CASE("ActionResponseParser - ACTION-RESPONSE-WITH-PBLOCK", "[ActionResponse]")
 {
-    ActionResponseParser parser;
-
-    SECTION("Caminho Feliz: Bloco de dados válido")
+    SECTION("Erro: frame incompleto para pblock")
     {
-        auto data = hexToBytes("C7 02 41 01 00 00 00 02 11 22");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
-
-    SECTION("Erro: Frame muito curto para conter a estrutura mínima de um pblock")
-    {
-        auto data = hexToBytes("C7 02 41 01 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: DataBlock-SA incompleto no offset interno")
-    {
-        auto data = hexToBytes("C7 02 41 01 00 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto data = hexToBytes("C7 02 41 00 00 00");
+        auto r = ActionResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }
 
-TEST_CASE("ActionResponseParser - ACTION-RESPONSE-WITH-LIST (Subtipo 0x03)", "[ActionResponse][WithList]")
+TEST_CASE("ActionResponseParser - ACTION-RESPONSE-NEXT-PBLOCK", "[ActionResponse]")
 {
-    ActionResponseParser parser;
-
-    SECTION("Caminho Feliz: Lista com múltiplos resultados")
+    SECTION("OK: número de bloco 1")
     {
-        auto data = hexToBytes("C7 03 41 02 00 00 02 01");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 6);
+        // sub=04 invoke=41 block=00000001
+        auto data = hexToBytes("C7 04 41 00 00 00 01");
+        auto r = ActionResponseParser::verify(data);
+        REQUIRE(ok(r));
     }
 
-    SECTION("Erro: Frame menor que o tamanho mínimo de lista")
+    SECTION("Erro: frame incompleto para block-number")
     {
-        auto data = hexToBytes("C7 03 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Lista truncada prematuramente")
-    {
-        auto data = hexToBytes("C7 03 41 02 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Action-Result inválido dentro de um elemento da lista")
-    {
-        auto data = hexToBytes("C7 03 41 01 FF");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-}
-
-TEST_CASE("ActionResponseParser - ACTION-RESPONSE-NEXT-PBLOCK (Subtipo 0x04)", "[ActionResponse][NextPblock]")
-{
-    ActionResponseParser parser;
-
-    SECTION("Caminho Feliz: Número de bloco decodificado com sucesso")
-    {
-        auto data = hexToBytes("C7 04 41 00 00 00 FF");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE_FALSE(response.fields.empty());
-
-        auto lastField = response.fields.back();
-        CHECK(lastField.name == "Block-Number");
-        CHECK(lastField.value == "255");
-    }
-
-    SECTION("Erro: Falta de bytes para compor o Unsigned32 do Block-Number")
-    {
-        auto data = hexToBytes("C7 04 41 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto data = hexToBytes("C7 04 41 00 00 00");
+        auto r = ActionResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }

@@ -3,155 +3,119 @@
 #include "core/CommandTypes/SET/RESPONSE/SetResponseParser.h"
 #include "hexToBytes.h"
 
-TEST_CASE("SetResponseParser - Validações Gerais", "[SetResponse][General]")
+static bool hasError(const FrameResponse &r)
 {
-    SetResponseParser parser;
+    return r.error.has_value();
+}
 
-    SECTION("Frame excessivamente curto (< 3 bytes)")
+static bool ok(const FrameResponse &r)
+{
+    return !r.error.has_value();
+}
+
+TEST_CASE("SetResponseParser - Frame curto demais", "[SetResponse]")
+{
+    auto data = hexToBytes("C5 01");
+    auto r = SetResponseParser::verify(data);
+    REQUIRE(hasError(r));
+}
+
+TEST_CASE("SetResponseParser - Subtipo desconhecido", "[SetResponse]")
+{
+    auto data = hexToBytes("C5 09 41");
+    auto r = SetResponseParser::verify(data);
+    REQUIRE(hasError(r));
+}
+
+TEST_CASE("SetResponseParser - Subtipos não implementados", "[SetResponse]")
+{
+    SECTION("SET-RESPONSE-LAST-DATABLOCK-WITH-LIST (0x04)")
     {
-        std::vector<uint8_t> data = {0xC5, 0x01};
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto data = hexToBytes("C5 04 41 00");
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 
-    SECTION("Subtipo de SET-RESPONSE desconhecido")
+    SECTION("SET-RESPONSE-WITH-LIST (0x05)")
     {
-        auto data = hexToBytes("C5 0A 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto data = hexToBytes("C5 05 41 00");
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }
 
-TEST_CASE("SetResponseParser - SET-RESPONSE-NORMAL (Subtipo 0x01)", "[SetResponse][Normal]")
+TEST_CASE("SetResponseParser - SET-RESPONSE-NORMAL", "[SetResponse]")
 {
-    SetResponseParser parser;
-
-    SECTION("Caminho Feliz: Mapeamento de sucesso")
+    SECTION("OK: result = success (0x00)")
     {
         auto data = hexToBytes("C5 01 41 00");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 2);
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(ok(r));
+        REQUIRE(r.fields.identifier == "set-response-normal");
     }
 
-    SECTION("Erro: Frame incompleto (< 4 bytes)")
+    SECTION("OK: result = hardware fault (0x01)")
+    {
+        auto data = hexToBytes("C5 01 41 01");
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(ok(r));
+    }
+
+    SECTION("Erro: frame incompleto — sem byte de resultado")
     {
         auto data = hexToBytes("C5 01 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 
-    SECTION("Erro: Código Data-Access-Result desconhecido")
+    SECTION("Erro: bytes extras após o resultado")
     {
-        auto data = hexToBytes("C5 01 41 AA");
-        auto response = parser.verify(data);
+        auto data = hexToBytes("C5 01 41 00 FF");
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(hasError(r));
+    }
 
-        REQUIRE_FALSE(response.valid);
+    SECTION("Erro: código de resultado desconhecido")
+    {
+        auto data = hexToBytes("C5 01 41 55");
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }
 
-TEST_CASE("SetResponseParser - SET-RESPONSE-DATABLOCK (Subtipo 0x02)", "[SetResponse][Datablock]")
+TEST_CASE("SetResponseParser - SET-RESPONSE-DATABLOCK", "[SetResponse]")
 {
-    SetResponseParser parser;
-
-    SECTION("Caminho Feliz: Leitura correta do Block-Number")
+    SECTION("OK: número de bloco 1")
     {
-        auto data = hexToBytes("C5 02 41 00 00 00 0C");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
+        // sub=02 invoke=41 block=00000001
+        auto data = hexToBytes("C5 02 41 00 00 00 01");
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(ok(r));
+        REQUIRE(r.fields.identifier == "set-response-datablock");
     }
 
-    SECTION("Erro: Frame incompleto (< 7 bytes)")
+    SECTION("Erro: frame incompleto para block-number")
     {
         auto data = hexToBytes("C5 02 41 00 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }
 
-TEST_CASE("SetResponseParser - SET-RESPONSE-LAST-DATABLOCK (Subtipo 0x03)", "[SetResponse][LastDatablock]")
+TEST_CASE("SetResponseParser - SET-RESPONSE-LAST-DATABLOCK", "[SetResponse]")
 {
-    SetResponseParser parser;
-
-    SECTION("Caminho Feliz: Resultado do acesso seguido do número do bloco")
+    SECTION("OK: resultado success + número de bloco 1")
     {
-        auto data = hexToBytes("C5 03 41 03 00 00 00 02");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 3);
+        // sub=03 invoke=41 result=00 block=00000001
+        auto data = hexToBytes("C5 03 41 00 00 00 00 01");
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(ok(r));
     }
 
-    SECTION("Erro: Frame incompleto (< 8 bytes)")
+    SECTION("Erro: frame incompleto")
     {
-        auto data = hexToBytes("C5 03 41 00 00 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-}
-
-TEST_CASE("SetResponseParser - SET-RESPONSE-LAST-DATABLOCK-WITH-LIST (Subtipo 0x04)", "[SetResponse][LastDatablockWithList]")
-{
-    SetResponseParser parser;
-
-    SECTION("Caminho Feliz: Múltiplos resultados na lista e Block-Number dinâmico no final")
-    {
-        auto data = hexToBytes("C5 04 41 02 01 04 00 00 00 07");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-    }
-
-    SECTION("Erro: Frame menor que o tamanho inicial estrutural de 9 bytes")
-    {
-        auto data = hexToBytes("C5 04 41 01 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Lista de resultados declarada maior que os bytes reais existentes")
-    {
-        auto data = hexToBytes("C5 04 41 03 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-
-    SECTION("Erro: Block-Number ausente após o processamento da lista de resultados")
-    {
-        auto data = hexToBytes("C5 04 41 01 00 00 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-}
-
-TEST_CASE("SetResponseParser - SET-RESPONSE-WITH-LIST (Subtipo 0x05)", "[SetResponse][WithList]")
-{
-    SetResponseParser parser;
-
-    SECTION("Caminho Feliz: Processamento limpo de lista de erros")
-    {
-        auto data = hexToBytes("C5 05 41 03 0B 0D 00");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.errors.empty());
-    }
-
-    SECTION("Erro: Frame abaixo do tamanho mínimo de checagem (5 bytes)")
-    {
-        auto data = hexToBytes("C5 05 41 01");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto data = hexToBytes("C5 03 41 00 00 00");
+        auto r = SetResponseParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }

@@ -9,10 +9,10 @@
 class GetRequestParser
 {
 public:
-    static auto verify(const std::vector<uint8_t> &data, int offset) -> FrameResponse;
+    static auto verify(const std::vector<uint8_t> &data) -> FrameResponse;
 
 private:
-    static auto verifyNormal(const std::vector<uint8_t> &data, int offset) -> FrameResponse;
+    static auto verifyNormal(const std::vector<uint8_t> &data) -> FrameResponse;
     static auto verifyNext(const std::vector<uint8_t> &data) -> FrameResponse;
 
     static auto Cosem_Attribute_Descriptor(const std::vector<uint8_t> &data, size_t offset) -> std::variant<ParsedField, Error>;

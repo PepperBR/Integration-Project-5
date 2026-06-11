@@ -3,114 +3,107 @@
 #include "core/CommandTypes/GET/REQUEST/GetRequestParser.h"
 #include "hexToBytes.h"
 
-TEST_CASE("GetRequestParser - Validações Gerais e Inicialização", "[GetRequest][General]")
+static bool hasError(const FrameResponse &r)
 {
-    GetRequestParser parser;
-
-    SECTION("Frame excessivamente curto (< 3 bytes)")
-    {
-        std::vector<uint8_t> data = {0xC0, 0x01};
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
-
-    SECTION("Subtipo de GET-REQUEST desconhecido")
-    {
-        auto data = hexToBytes("C0 0A 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
+    return r.error.has_value();
 }
 
-TEST_CASE("GetRequestParser - GET-REQUEST-NORMAL (Subtipo 0x01)", "[GetRequest][Normal]")
+static bool ok(const FrameResponse &r)
 {
-    GetRequestParser parser;
+    return !r.error.has_value();
+}
 
-    SECTION("Caminho Feliz: Descriptor válido sem Access-Selection adicional")
-    {
-        auto data = hexToBytes("C0 01 41 00 01 01 00 01 08 00 FF 02");
-        auto response = parser.verify(data);
+TEST_CASE("GetRequestParser - Frame curto demais", "[GetRequest]")
+{
+    auto data = hexToBytes("C0 01");
+    auto r = GetRequestParser::verify(data);
+    REQUIRE(hasError(r));
+}
 
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
+TEST_CASE("GetRequestParser - Subtipo desconhecido", "[GetRequest]")
+{
+    auto data = hexToBytes("C0 0A 41");
+    auto r = GetRequestParser::verify(data);
+    REQUIRE(hasError(r));
+}
 
-    SECTION("Caminho Feliz: Com Selective-Access-Descriptor presente")
-    {
-        auto data = hexToBytes("C0 01 41 00 01 01 00 01 08 00 FF 02 01");
-        auto response = parser.verify(data);
+TEST_CASE("GetRequestParser - GET-REQUEST-WITH-LIST não implementado", "[GetRequest]")
+{
+    auto data = hexToBytes("C0 03 41");
+    auto r = GetRequestParser::verify(data);
+    REQUIRE(hasError(r));
+}
 
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.errors.empty());
-    }
-
-    SECTION("Caminho Feliz: Com flag de seleção indicando ausência")
+TEST_CASE("GetRequestParser - GET-REQUEST-NORMAL sem seleção de acesso", "[GetRequest]")
+{
+    SECTION("Frame válido: sel=00 sem bytes extras")
     {
         auto data = hexToBytes("C0 01 41 00 01 01 00 01 08 00 FF 02 00");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE(response.fields.size() >= 3);
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(ok(r));
+        REQUIRE(r.fields.values.size() >= 2);
+        REQUIRE(r.fields.identifier == "get-request-normal");
     }
 
-    SECTION("Erro: Frame abaixo do tamanho mínimo de 12 bytes")
+    SECTION("Erro: sel=00 mas com bytes extras no final")
     {
-        auto data = hexToBytes("C0 01 41 00 01 01 00 01 08");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
+        auto data = hexToBytes("C0 01 41 00 01 01 00 01 08 00 FF 02 00 FF");
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(hasError(r));
     }
 
-    SECTION("Erro: Descriptor falha por falta de dados internos")
+    SECTION("Erro: frame incompleto — sem byte de seleção")
     {
         auto data = hexToBytes("C0 01 41 00 01 01 00 01 08 00 FF 02");
-        auto response = parser.verify(data);
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(hasError(r));
+    }
 
-        auto badHeaderData = hexToBytes("C0 01 FF 00 01 01 00 01 08 00 FF 02");
-        auto headerResponse = parser.verify(badHeaderData);
+    SECTION("Erro: flag de seleção inválido (nem 0x00 nem 0x01)")
+    {
+        auto data = hexToBytes("C0 01 41 00 01 01 00 01 08 00 FF 02 FF");
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(hasError(r));
+    }
+
+    SECTION("Erro: flag sel=01 mas sem dados de seleção seguintes")
+    {
+        auto data = hexToBytes("C0 01 41 00 01 01 00 01 08 00 FF 02 01");
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(hasError(r));
+    }
+
+    SECTION("OK: flag sel=01 com byte de dado de seleção presente")
+    {
+        auto data = hexToBytes("C0 01 41 00 01 01 00 01 08 00 FF 02 01 AA");
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(ok(r));
     }
 }
 
-TEST_CASE("GetRequestParser - GET-REQUEST-NEXT (Subtipo 0x02)", "[GetRequest][Next]")
+TEST_CASE("GetRequestParser - GET-REQUEST-NEXT", "[GetRequest]")
 {
-    GetRequestParser parser;
-
-    SECTION("Caminho Feliz: Número de bloco lido corretamente")
+    SECTION("Frame válido: número de bloco 1")
     {
-        auto data = hexToBytes("C0 02 41 00 00 00 0A");
-        auto response = parser.verify(data);
-
-        REQUIRE(response.valid);
-        REQUIRE_FALSE(response.fields.empty());
-
-        auto lastField = response.fields.back();
-        CHECK(lastField.name == "Block-Number");
-        CHECK(lastField.value == "10");
+        auto data = hexToBytes("C0 02 41 00 00 00 01");
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(ok(r));
+        auto &last = r.fields.values.back();
+        REQUIRE(last.identifier == "block-number");
+        REQUIRE(last.value_bytes == "00 00 00 01");
     }
 
-    SECTION("Erro: Frame menor que o tamanho mínimo de 7 bytes")
+    SECTION("Frame válido: número de bloco 255")
+    {
+        auto data = hexToBytes("C0 02 41 00 00 00 FF");
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(ok(r));
+    }
+
+    SECTION("Erro: frame menor que 7 bytes (payload do bloco incompleto)")
     {
         auto data = hexToBytes("C0 02 41 00 00 00");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-    }
-}
-
-TEST_CASE("GetRequestParser - GET-REQUEST-WITH-LIST (Subtipo 0x03)", "[GetRequest][WithList]")
-{
-    GetRequestParser parser;
-
-    SECTION("Mapeamento do recurso não implementado")
-    {
-        auto data = hexToBytes("C0 03 41");
-        auto response = parser.verify(data);
-
-        REQUIRE_FALSE(response.valid);
-        REQUIRE_FALSE(response.fields.empty());
+        auto r = GetRequestParser::verify(data);
+        REQUIRE(hasError(r));
     }
 }

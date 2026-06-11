@@ -22,6 +22,8 @@ target_sources(${PROJECT_NAME}
 
         ${CMAKE_CURRENT_SOURCE_DIR}/src/test_SetRequestVerifier.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/test_SetResponseVerifier.cpp
+
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/test_XDlms.cpp
 )
 
 target_link_libraries(${PROJECT_NAME} 
